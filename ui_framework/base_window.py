@@ -1,10 +1,21 @@
+"""
+文件路径: ui_framework/base_window.py
+=========================================================
+【可用接口说明】
+
+class BaseMainWindow(QMainWindow):
+    # 1. paintEvent(event): 自动处理背景图绘制逻辑 (0.15 不透明度)
+    # 2. resizeEvent(event): 处理窗口缩放时右下角签名的定位
+    # 3. setWindowIcon(): 启动时加载根目录下的 Brush.ico
+=========================================================
+"""
+
 import os
 import sys
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                                QLabel, QSizePolicy, QApplication)
-from PySide6.QtGui import (QAction, QColor, QPixmap, QPainter,
-                           QGuiApplication)
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import (QColor, QPixmap, QPainter, QGuiApplication, QIcon)
+from PySide6.QtCore import Qt
 
 
 class BaseMainWindow(QMainWindow):
@@ -12,7 +23,13 @@ class BaseMainWindow(QMainWindow):
         super().__init__()
 
         # 设置默认标题
-        self.setWindowTitle("参考文献国标刷")
+        self.setWindowTitle("Ref-Brusher | 文献国标刷")
+
+        # --- 设置窗口图标 ---
+        # 直接读取根目录下的图标文件
+        icon_path = "Brush.ico"
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         # === 1. 屏幕自适应设置 ===
         screen = QGuiApplication.primaryScreen()
@@ -28,35 +45,26 @@ class BaseMainWindow(QMainWindow):
         # === 2. 加载背景图片逻辑 ===
         self.bg_pixmap = None
         self.show_bg_image = True
-
-        # 【修改】路径改为根目录下的 background.jpg
-        # 假设程序是从根目录运行的 (python main.py)，直接使用文件名即可
         bg_path = "background.jpg"
 
-        # 简单的存在性检查
         if os.path.exists(bg_path):
             self.bg_pixmap = QPixmap(bg_path)
-            # print(f"✅ 已加载背景图: {bg_path}") # 调试用
         else:
-            # 如果没找到，可以在控制台输出提示，方便排查
             print(f"⚠️ 未找到背景图: {bg_path} (请确保图片位于项目根目录)")
 
-        # === 3. (已删除) 顶部工具栏 ===
-        # 原有的 Home/Settings 按钮已移除，使界面更纯净
-
-        # === 4. 左下角签名 ===
+        # === 3. 左下角签名 ===
         self.signature_label = QLabel("@小白元宵", self)
         self.signature_label.setStyleSheet("""
             color: rgba(100, 100, 100, 150); 
-            font-family: "Microsoft YaHei";
-            font-size: 11px;
+            font-family: 'Microsoft YaHei'; 
+            font-size: 11px; 
             font-weight: bold;
             background: transparent;
         """)
         self.signature_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.signature_label.adjustSize()
 
-        # === 5. 中央主区域 ===
+        # === 4. 中央主区域 ===
         self.central_widget = QWidget()
         self.central_widget.setAttribute(Qt.WA_TranslucentBackground)  # 必须透明
         self.setCentralWidget(self.central_widget)
@@ -66,19 +74,23 @@ class BaseMainWindow(QMainWindow):
 
     # === 事件处理 ===
     def resizeEvent(self, event):
+        """当窗口大小改变时，重新定位签名标签"""
         super().resizeEvent(event)
         if hasattr(self, 'signature_label'):
+            # 定位在左下角，留一点边距
             self.signature_label.move(10, self.height() - self.signature_label.height() - 5)
             self.signature_label.raise_()
 
     def paintEvent(self, event):
+        """绘制窗口背景色及半透明背景图"""
         painter = QPainter(self)
+
         # 绘制背景色 (淡蓝灰)
         painter.fillRect(self.rect(), QColor("#f0f2f5"))
 
-        # 绘制背景图 (如果有)
+        # 绘制背景图
         if self.show_bg_image and self.bg_pixmap and not self.bg_pixmap.isNull():
-            # 【修改】将不透明度设置为 0.06
+            # 设置不透明度为 0.15
             painter.setOpacity(0.15)
 
             # 保持比例铺满窗口
