@@ -1,17 +1,29 @@
 # main.py
 # ==============================================================================
-# 模块名称: 主程序入口 - 复制逻辑优化版
-# 功能描述:
-#   1. 修复复制时多余空行的问题 (界面显示空行，复制时自动去除)
+# 可用接口:
+# - get_resource_path(relative_path): 获取打包后资源的绝对路径
+# - RefFormatterController.run(): 启动 GUI 程序
 # ==============================================================================
 
 import sys
+import os
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
-from PySide6.QtCore import QThread, Signal, QObject
+from PySide6.QtCore import QThread, Signal, QObject, Qt
 
+# 导入你自己的模块
 from views.main_view import MainView
 from services.orchestrator import Orchestrator
 
+def get_resource_path(relative_path):
+    """ 获取资源绝对路径，解决打包后找不到文件的问题 """
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller 打包后的临时解压路径
+        return os.path.join(sys._MEIPASS, relative_path)
+    # 开发环境下的当前路径
+    return os.path.join(os.path.abspath("."), relative_path)
+
+# 预加载资源路径（供 views 或其他地方使用）
+BG_PATH = get_resource_path("background.jpg")
 
 class WorkerThread(QThread):
     progress_updated = Signal(int, str)
@@ -36,10 +48,10 @@ class WorkerThread(QThread):
         except Exception as e:
             self.error_occurred.emit(str(e))
 
-
 class RefFormatterController:
     def __init__(self):
         self.app = QApplication(sys.argv)
+        # 如果你的 MainView 需要背景图，可以把 BG_PATH 传进去
         self.view = MainView()
         self.view.setup_ui()
         self.orchestrator = Orchestrator()
@@ -49,11 +61,11 @@ class RefFormatterController:
         self.view.show()
 
     def connect_signals(self):
-        if self.view.btn_convert:
+        if hasattr(self.view, 'btn_convert') and self.view.btn_convert:
             self.view.btn_convert.clicked.connect(self.start_batch_processing)
-        if self.view.btn_copy_with_num:
+        if hasattr(self.view, 'btn_copy_with_num') and self.view.btn_copy_with_num:
             self.view.btn_copy_with_num.clicked.connect(self.copy_result_with_num)
-        if self.view.btn_copy_no_num:
+        if hasattr(self.view, 'btn_copy_no_num') and self.view.btn_copy_no_num:
             self.view.btn_copy_no_num.clicked.connect(self.copy_result_no_num)
 
     def start_batch_processing(self):
@@ -113,26 +125,21 @@ class RefFormatterController:
         self.worker = None
 
     def copy_result_with_num(self):
-        """复制带序号文本 (自动去除界面显示用的额外空行)"""
         text = self.current_results.get("with_num", "")
         if text:
-            # 【关键修改】把双换行替换回单换行，实现紧凑复制
             clean_text = text.replace("\n\n", "\n")
             QApplication.clipboard().setText(clean_text)
             self.view.status_label.setText("📋 已复制 (带序号)")
 
     def copy_result_no_num(self):
-        """复制无序号文本 (自动去除界面显示用的额外空行)"""
         text = self.current_results.get("no_num", "")
         if text:
-            # 【关键修改】把双换行替换回单换行
             clean_text = text.replace("\n\n", "\n")
             QApplication.clipboard().setText(clean_text)
             self.view.status_label.setText("📋 已复制 (纯净版)")
 
     def run(self):
         sys.exit(self.app.exec())
-
 
 if __name__ == "__main__":
     controller = RefFormatterController()

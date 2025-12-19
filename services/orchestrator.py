@@ -119,7 +119,7 @@ class Orchestrator:
         title_lower = data.title.lower()
         if data.doi and data.doi.lower() in query_lower: return True, "DOI匹配"
         similarity = difflib.SequenceMatcher(None, query_lower, title_lower).ratio()
-        if similarity > 0.6: return True, "相似度达标"
+        if similarity > 0.7: return True, "相似度达标"
         query_words = [w for w in re.split(r'\W+', query_lower) if len(w) > 3]
         if not query_words: return True, "输入过短"
         hit_count = sum(1 for w in query_words if w in title_lower)

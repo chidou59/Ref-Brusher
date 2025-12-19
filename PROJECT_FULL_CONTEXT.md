@@ -1,5 +1,5 @@
 # 项目上下文文档
-生成时间: 2025-12-19 18:59:42
+生成时间: 2025-12-19 21:20:06
 
 > 注意：此文档包含项目的完整代码细节。请将此文件发送给 AI 助手以便进行代码修改。
 
@@ -21,6 +21,7 @@
 │   📂 core/
 │   │   verifier.py
 │   │   __init__.py
+│   📂 fig/
 │   📂 logic/
 │   │   cn_search_engine.py
 │   │   __init__.py
@@ -62,8 +63,8 @@
 ```python:build_tool.py
 """
 Available Interfaces:
-- build_exe(): 主构建函数，执行自动化检查、安装依赖并调用 PyInstaller。
-- get_resource_path(relative_path): 关键辅助函数，用于代码中获取图片等资源的绝对路径。
+- get_resource_path(relative_path): 用于在代码中获取资源（如 background.jpg）在打包后的真实路径。
+- build_exe(): 核心函数，包含环境检查、依赖安装、图标识别及 PyInstaller 调用。
 """
 
 import os
@@ -72,22 +73,21 @@ import subprocess
 import shutil
 
 # ==========================================
-# 👇 用户配置区 (脚本会自动尝试识别，通常无需修改) 👇
+# 👇 用户配置区 (脚本会自动尝试识别) 👇
 # ==========================================
 
-# 1. 软件名称 (默认取文件夹名字，也可手动改如 "MyApp")
+# 获取当前脚本所在文件夹作为根目录
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 1. 默认软件名称（取文件夹名）
 APP_NAME = os.path.basename(BASE_DIR)
 
-# 2. 入口文件 (默认寻找 main.py)
+# 2. 入口文件
 MAIN_FILE = "main.py"
 
-# 3. 必须包含的单个文件 (如你的 background.jpg)
-# 只要放在根目录下，这里写上文件名，打包工具就会把它塞进 exe
+# 3. 静态资源（如背景图）
+# 只要这些文件在根目录下，就会被自动打包进去
 EXTRA_FILES = ["background.jpg"]
-
-# 4. 资源文件夹 (如果有 assets 文件夹则保留，没有会自动跳过)
-ASSETS_DIR_NAME = "assets"
 
 
 # ==========================================
@@ -96,95 +96,97 @@ ASSETS_DIR_NAME = "assets"
 
 def get_resource_path(relative_path):
     """
-    【重要】非科班同学请注意：
-    在你的 main.py 中，加载图片的代码必须改为：
-    img_path = get_resource_path("background.jpg")
-    这样打包成 exe 后才能找到图片。
+    专门解决打包后路径找不到的问题。
+    在你的 main.py 中加载 background.jpg 时，请使用：
+    path = get_resource_path("background.jpg")
     """
     if hasattr(sys, '_MEIPASS'):
+        # PyInstaller 打包后的临时解压路径
         return os.path.join(sys._MEIPASS, relative_path)
+    # 开发环境下的路径
     return os.path.join(os.path.abspath("."), relative_path)
 
 
 def build_exe():
-    print(f"🚀 启动通用打包工具...")
-    os.chdir(BASE_DIR)  # 确保工作目录在脚本所在位置
+    print(f"🚀 启动通用打包工具 [当前目录: {BASE_DIR}]")
+    os.chdir(BASE_DIR)
 
-    # 1. 环境准备：安装依赖
-    req_file = "requirements.txt"
-    if os.path.exists(req_file):
-        print(f"📦 检测到 {req_file}，正在检查/安装依赖库...")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file])
-        except Exception as e:
-            print(f"⚠️ 安装依赖失败，请检查网络或 pip 环境: {e}")
+    # 1. 自动安装要求
+    if os.path.exists("requirements.txt"):
+        print("📦 正在根据 requirements.txt 安装/更新第三方库...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
 
-    # 安装 PyInstaller
+    # 2. 检查 PyInstaller
     try:
         import PyInstaller
     except ImportError:
-        print("⚠️ 正在安装打包核心组件 PyInstaller...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", pyinstaller])
+        print("⚠️ 正在安装打包工具 PyInstaller...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
 
-    # 2. 自动搜寻图标 (.ico)
-    icon_file = ""
-    for file in os.listdir(BASE_DIR):
-        if file.endswith(".ico"):
-            icon_file = file
-            print(f"🎨 自动发现图标文件: {icon_file}")
+    # 3. 自动识别图标 (.ico)
+    icon_file = None
+    for f in os.listdir(BASE_DIR):
+        if f.lower().endswith(".ico"):
+            icon_file = f
+            print(f"🎨 找到图标文件: {icon_file}")
             break
 
-    # 3. 确认入口文件
-    if not os.path.exists(MAIN_FILE):
-        print(f"❌ 错误：在当前目录找不到 {MAIN_FILE}！")
-        return
+    # 4. 用户交互：选择打包模式
+    print("\n" + "=" * 30)
+    print("请选择打包模式：")
+    print("1. 单文件模式 (Onefile) -> 生成一个独立的 .exe，方便分发，启动稍慢")
+    print("2. 文件夹模式 (Onedir)  -> 生成一个包含依赖的文件夹，启动极快")
+    print("=" * 30)
 
-    # 4. 选择模式
-    print("\n请选择打包模式：")
-    print("1. 单文件 (.exe) - 方便传给别人，启动稍慢")
-    print("2. 文件夹 (目录) - 启动极快，适合专业软件")
-    choice = input("请输入 1 或 2 [默认1]: ").strip()
-    mode_arg = "--onedir" if choice == "2" else "--onefile"
+    user_choice = input("请输入选项 (1 或 2) [默认 1]: ").strip()
 
-    # 5. 构建命令
+    if user_choice == "2":
+        mode_arg = "--onedir"
+        mode_desc = "文件夹模式"
+    else:
+        mode_arg = "--onefile"
+        mode_desc = "单文件模式"
+
+    print(f"已选择: {mode_desc}")
+
+    # 5. 构建 PyInstaller 命令
     cmd = [
         "pyinstaller",
-        "--noconsole",  # 不显示黑窗口
-        "--clean",  # 打包前清理临时文件
+        "--noconsole",  # 不显示黑框
+        "--clean",  # 清理缓存
         mode_arg,
-        f'--name={APP_NAME}',
+        f'--name={APP_NAME}'
     ]
 
     # 添加图标
     if icon_file:
         cmd.append(f'--icon={icon_file}')
 
-    # 添加 background.jpg 等单文件
+    # 添加背景图等单文件
     for f in EXTRA_FILES:
         if os.path.exists(f):
-            # 格式：--add-data "源文件;打包后路径" (Windows用分号)
+            # Windows 下使用分号分隔：源文件;目标位置
             cmd.append(f'--add-data="{f};."')
-            print(f"🖼️ 已添加额外资源: {f}")
+            print(f"🖼️ 已关联资源: {f}")
 
-    # 添加 assets 文件夹
-    if os.path.exists(ASSETS_DIR_NAME):
-        cmd.append(f'--add-data="{ASSETS_DIR_NAME};{ASSETS_DIR_NAME}"')
-        print(f"📂 已添加文件夹: {ASSETS_DIR_NAME}")
+    # 添加 assets 文件夹（如果存在）
+    if os.path.exists("assets"):
+        cmd.append('--add-data="assets;assets"')
+        print("📂 已关联 assets 文件夹")
 
+    # 指定入口文件
     cmd.append(MAIN_FILE)
 
     # 6. 执行打包
-    full_command = " ".join(cmd)
-    print("\n" + "=" * 50)
-    print(f"🛠️ 正在执行: {full_command}")
-    print("=" * 50 + "\n")
+    full_cmd = " ".join(cmd)
+    print(f"\n🛠️ 执行指令: {full_cmd}")
 
-    os.system(full_command)
-
-    # 7. 善后
-    if os.path.exists("dist"):
-        print(f"\n✅ 打包任务完成！请查看 dist 文件夹。")
+    try:
+        os.system(full_cmd)
+        print(f"\n✅ 打包成功！请查看 dist 文件夹。")
         os.startfile("dist")
+    except Exception as e:
+        print(f"❌ 打包过程中出现错误: {e}")
 
 
 if __name__ == "__main__":
@@ -411,6 +413,14 @@ from PySide6.QtCore import QThread, Signal, QObject
 from views.main_view import MainView
 from services.orchestrator import Orchestrator
 
+def get_resource_path(relative_path):
+    import sys, os
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+# --- 修改加载图片的地方 ---
+bg_path = get_resource_path("background.jpg")
 
 class WorkerThread(QThread):
     progress_updated = Signal(int, str)
@@ -536,6 +546,14 @@ class RefFormatterController:
 if __name__ == "__main__":
     controller = RefFormatterController()
     controller.run()
+```
+
+---
+
+### 📄 `requirements.txt`
+
+```txt:requirements.txt
+
 ```
 
 ---
@@ -1219,7 +1237,7 @@ class Orchestrator:
         title_lower = data.title.lower()
         if data.doi and data.doi.lower() in query_lower: return True, "DOI匹配"
         similarity = difflib.SequenceMatcher(None, query_lower, title_lower).ratio()
-        if similarity > 0.6: return True, "相似度达标"
+        if similarity > 0.7: return True, "相似度达标"
         query_words = [w for w in re.split(r'\W+', query_lower) if len(w) > 3]
         if not query_words: return True, "输入过短"
         hit_count = sum(1 for w in query_words if w in title_lower)
@@ -2362,24 +2380,13 @@ class BaseSplashScreen(QSplashScreen):
 ### 📄 `ui_framework\base_window.py`
 
 ```python:ui_framework\base_window.py
-"""
-文件路径: ui_framework/base_window.py
-=========================================================
-【可用接口说明】
-
-class BaseMainWindow(QMainWindow):
-    # 1. paintEvent(event): 自动处理背景图绘制逻辑 (0.15 不透明度)
-    # 2. resizeEvent(event): 处理窗口缩放时右下角签名的定位
-    # 3. setWindowIcon(): 启动时加载根目录下的 Brush.ico
-=========================================================
-"""
-
 import os
 import sys
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
                                QLabel, QSizePolicy, QApplication)
-from PySide6.QtGui import (QColor, QPixmap, QPainter, QGuiApplication, QIcon)
-from PySide6.QtCore import Qt
+from PySide6.QtGui import (QAction, QColor, QPixmap, QPainter,
+                           QGuiApplication)
+from PySide6.QtCore import Qt, QSize
 
 
 class BaseMainWindow(QMainWindow):
@@ -2387,13 +2394,7 @@ class BaseMainWindow(QMainWindow):
         super().__init__()
 
         # 设置默认标题
-        self.setWindowTitle("Ref-Brusher | 文献国标刷")
-
-        # --- 设置窗口图标 ---
-        # 直接读取根目录下的图标文件
-        icon_path = "Brush.ico"
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        self.setWindowTitle("参考文献国标刷")
 
         # === 1. 屏幕自适应设置 ===
         screen = QGuiApplication.primaryScreen()
@@ -2409,26 +2410,35 @@ class BaseMainWindow(QMainWindow):
         # === 2. 加载背景图片逻辑 ===
         self.bg_pixmap = None
         self.show_bg_image = True
+
+        # 【修改】路径改为根目录下的 background.jpg
+        # 假设程序是从根目录运行的 (python main.py)，直接使用文件名即可
         bg_path = "background.jpg"
 
+        # 简单的存在性检查
         if os.path.exists(bg_path):
             self.bg_pixmap = QPixmap(bg_path)
+            # print(f"✅ 已加载背景图: {bg_path}") # 调试用
         else:
+            # 如果没找到，可以在控制台输出提示，方便排查
             print(f"⚠️ 未找到背景图: {bg_path} (请确保图片位于项目根目录)")
 
-        # === 3. 左下角签名 ===
+        # === 3. (已删除) 顶部工具栏 ===
+        # 原有的 Home/Settings 按钮已移除，使界面更纯净
+
+        # === 4. 左下角签名 ===
         self.signature_label = QLabel("@小白元宵", self)
         self.signature_label.setStyleSheet("""
             color: rgba(100, 100, 100, 150); 
-            font-family: 'Microsoft YaHei'; 
-            font-size: 11px; 
+            font-family: "Microsoft YaHei";
+            font-size: 11px;
             font-weight: bold;
             background: transparent;
         """)
         self.signature_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.signature_label.adjustSize()
 
-        # === 4. 中央主区域 ===
+        # === 5. 中央主区域 ===
         self.central_widget = QWidget()
         self.central_widget.setAttribute(Qt.WA_TranslucentBackground)  # 必须透明
         self.setCentralWidget(self.central_widget)
@@ -2438,23 +2448,19 @@ class BaseMainWindow(QMainWindow):
 
     # === 事件处理 ===
     def resizeEvent(self, event):
-        """当窗口大小改变时，重新定位签名标签"""
         super().resizeEvent(event)
         if hasattr(self, 'signature_label'):
-            # 定位在左下角，留一点边距
             self.signature_label.move(10, self.height() - self.signature_label.height() - 5)
             self.signature_label.raise_()
 
     def paintEvent(self, event):
-        """绘制窗口背景色及半透明背景图"""
         painter = QPainter(self)
-
         # 绘制背景色 (淡蓝灰)
         painter.fillRect(self.rect(), QColor("#f0f2f5"))
 
-        # 绘制背景图
+        # 绘制背景图 (如果有)
         if self.show_bg_image and self.bg_pixmap and not self.bg_pixmap.isNull():
-            # 设置不透明度为 0.15
+            # 【修改】将不透明度设置为 0.06
             painter.setOpacity(0.15)
 
             # 保持比例铺满窗口
