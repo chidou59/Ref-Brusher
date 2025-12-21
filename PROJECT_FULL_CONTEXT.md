@@ -1,5 +1,5 @@
 # 项目上下文文档
-生成时间: 2025-12-19 21:20:06
+生成时间: 2025-12-21 11:48:26
 
 > 注意：此文档包含项目的完整代码细节。请将此文件发送给 AI 助手以便进行代码修改。
 
@@ -11,6 +11,7 @@
 │   .gitignore
 │   build_tool.py
 │   config.py
+│   desktop.ini
 │   diagnose.py
 │   import_tool.py
 │   main.py
@@ -61,133 +62,105 @@
 ### 📄 `build_tool.py`
 
 ```python:build_tool.py
-"""
-Available Interfaces:
-- get_resource_path(relative_path): 用于在代码中获取资源（如 background.jpg）在打包后的真实路径。
-- build_exe(): 核心函数，包含环境检查、依赖安装、图标识别及 PyInstaller 调用。
-"""
+# build_tool.py
+# ==============================================================================
+# 可用接口:
+# - build_exe(): 核心打包函数，自动处理依赖、图标、图片并调用 PyInstaller
+#   (新增功能：如果程序未关闭，会提示用户重试，而不是直接报错)
+# ==============================================================================
 
 import os
 import sys
 import subprocess
 import shutil
+import time
 
-# ==========================================
-# 👇 用户配置区 (脚本会自动尝试识别) 👇
-# ==========================================
-
-# 获取当前脚本所在文件夹作为根目录
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# 1. 默认软件名称（取文件夹名）
 APP_NAME = os.path.basename(BASE_DIR)
-
-# 2. 入口文件
 MAIN_FILE = "main.py"
-
-# 3. 静态资源（如背景图）
-# 只要这些文件在根目录下，就会被自动打包进去
 EXTRA_FILES = ["background.jpg"]
 
-
-# ==========================================
-# 👆 配置结束 👆
-# ==========================================
-
-def get_resource_path(relative_path):
-    """
-    专门解决打包后路径找不到的问题。
-    在你的 main.py 中加载 background.jpg 时，请使用：
-    path = get_resource_path("background.jpg")
-    """
-    if hasattr(sys, '_MEIPASS'):
-        # PyInstaller 打包后的临时解压路径
-        return os.path.join(sys._MEIPASS, relative_path)
-    # 开发环境下的路径
-    return os.path.join(os.path.abspath("."), relative_path)
-
-
 def build_exe():
-    print(f"🚀 启动通用打包工具 [当前目录: {BASE_DIR}]")
+    print(f"🚀 启动打包工具 [目录: {BASE_DIR}]")
     os.chdir(BASE_DIR)
 
-    # 1. 自动安装要求
-    if os.path.exists("requirements.txt"):
-        print("📦 正在根据 requirements.txt 安装/更新第三方库...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+    # 0. 清理旧的构建文件 (带重试机制)
+    for folder in ['build', 'dist']:
+        if os.path.exists(folder):
+            print(f"🧹 正在清理 {folder} 文件夹...")
+            while True:
+                try:
+                    shutil.rmtree(folder)
+                    break  # 成功删除，跳出循环
+                except PermissionError:
+                    print(f"\n⚠️ 无法删除 {folder}，因为它可能正在被占用。")
+                    print("👉 请检查是否还没关闭之前的程序？(Ref-Brusher.exe)")
+                    user_input = input("❌ 请关闭程序后按回车键重试 (输入 n 退出): ")
+                    if user_input.lower() == 'n':
+                        print("🚫 打包已取消。")
+                        return
+                except Exception as e:
+                    print(f"❌ 清理出错: {e}")
+                    return
 
-    # 2. 检查 PyInstaller
+    # 1. 确保环境里有 PySide6 和 PyInstaller
+    print("📦 检查并安装必要环境...")
     try:
-        import PyInstaller
-    except ImportError:
-        print("⚠️ 正在安装打包工具 PyInstaller...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "PySide6", "pyinstaller"])
+    except subprocess.CalledProcessError:
+        print("⚠️ 安装库时出现警告，尝试继续...")
 
-    # 3. 自动识别图标 (.ico)
+    # 2. 自动识别图标
     icon_file = None
     for f in os.listdir(BASE_DIR):
         if f.lower().endswith(".ico"):
             icon_file = f
-            print(f"🎨 找到图标文件: {icon_file}")
+            print(f"🎨 找到图标: {icon_file}")
             break
 
-    # 4. 用户交互：选择打包模式
-    print("\n" + "=" * 30)
-    print("请选择打包模式：")
-    print("1. 单文件模式 (Onefile) -> 生成一个独立的 .exe，方便分发，启动稍慢")
-    print("2. 文件夹模式 (Onedir)  -> 生成一个包含依赖的文件夹，启动极快")
-    print("=" * 30)
+    # 3. 选择模式
+    print("\n1. 单文件模式 (Onefile) - 只有一个exe，清爽但启动稍慢")
+    print("2. 文件夹模式 (Onedir)  - 一个文件夹，启动快但在文件夹里找exe")
+    user_choice = input("请输入选项 [默认 1]: ").strip()
+    mode_arg = "--onedir" if user_choice == "2" else "--onefile"
 
-    user_choice = input("请输入选项 (1 或 2) [默认 1]: ").strip()
-
-    if user_choice == "2":
-        mode_arg = "--onedir"
-        mode_desc = "文件夹模式"
-    else:
-        mode_arg = "--onefile"
-        mode_desc = "单文件模式"
-
-    print(f"已选择: {mode_desc}")
-
-    # 5. 构建 PyInstaller 命令
+    # 4. 构建命令
     cmd = [
-        "pyinstaller",
-        "--noconsole",  # 不显示黑框
-        "--clean",  # 清理缓存
+        sys.executable, "-m", "PyInstaller",
+        "--noconsole",
+        "--clean",
         mode_arg,
-        f'--name={APP_NAME}'
+        f'--name={APP_NAME}',
+        # 强制包含关键子模块，防止自动识别失败
+        "--hidden-import=PySide6.QtWidgets",
+        "--hidden-import=PySide6.QtGui",
+        "--hidden-import=PySide6.QtCore"
     ]
 
-    # 添加图标
     if icon_file:
         cmd.append(f'--icon={icon_file}')
 
-    # 添加背景图等单文件
+    # 添加背景图等静态文件
     for f in EXTRA_FILES:
         if os.path.exists(f):
-            # Windows 下使用分号分隔：源文件;目标位置
-            cmd.append(f'--add-data="{f};."')
+            # Windows 分号分隔格式：源文件;目标位置(.)
+            cmd.append(f'--add-data={f};.')
             print(f"🖼️ 已关联资源: {f}")
 
-    # 添加 assets 文件夹（如果存在）
+    # 如果有 views 或 services 文件夹，PyInstaller 通常能自动识别，
+    # 但如果是单纯的资源文件夹 assets，需要手动添加：
     if os.path.exists("assets"):
-        cmd.append('--add-data="assets;assets"')
-        print("📂 已关联 assets 文件夹")
+        cmd.append('--add-data=assets;assets')
 
-    # 指定入口文件
     cmd.append(MAIN_FILE)
 
-    # 6. 执行打包
-    full_cmd = " ".join(cmd)
-    print(f"\n🛠️ 执行指令: {full_cmd}")
-
+    print(f"\n🛠️ 正在执行打包，请稍候...")
     try:
-        os.system(full_cmd)
-        print(f"\n✅ 打包成功！请查看 dist 文件夹。")
+        subprocess.check_call(cmd)
+        print(f"\n✅ 打包完成！exe 文件在 dist 文件夹中。")
         os.startfile("dist")
     except Exception as e:
-        print(f"❌ 打包过程中出现错误: {e}")
-
+        print(f"❌ 打包失败: {e}")
 
 if __name__ == "__main__":
     build_exe()
@@ -303,6 +276,20 @@ DEFAULT_STYLE = "gbt7714-2015"
 
 ---
 
+### 📄 `desktop.ini`
+
+```ini:desktop.ini
+[.ShellClassInfo]
+IconResource=C:\Users\hansh\PycharmProjects\Github\Ref-Brusher\Brush.ico,0
+[ViewState]
+Mode=
+Vid=
+FolderType=Generic
+
+```
+
+---
+
 ### 📄 `diagnose.py`
 
 ```python:diagnose.py
@@ -401,26 +388,33 @@ print("\n诊断结束。")
 ```python:main.py
 # main.py
 # ==============================================================================
-# 模块名称: 主程序入口 - 复制逻辑优化版
-# 功能描述:
-#   1. 修复复制时多余空行的问题 (界面显示空行，复制时自动去除)
+# 可用接口:
+# - get_resource_path(relative_path): 获取打包后资源的绝对路径
+# - RefFormatterController.run(): 启动 GUI 程序
 # ==============================================================================
 
 import sys
+import os
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
-from PySide6.QtCore import QThread, Signal, QObject
+from PySide6.QtCore import QThread, Signal, QObject, Qt
 
+# 导入你自己的模块
 from views.main_view import MainView
 from services.orchestrator import Orchestrator
 
+
 def get_resource_path(relative_path):
-    import sys, os
+    """ 获取资源绝对路径，解决打包后找不到文件的问题 """
     if hasattr(sys, '_MEIPASS'):
+        # PyInstaller 打包后的临时解压路径
         return os.path.join(sys._MEIPASS, relative_path)
+    # 开发环境下的当前路径
     return os.path.join(os.path.abspath("."), relative_path)
 
-# --- 修改加载图片的地方 ---
-bg_path = get_resource_path("background.jpg")
+
+# 预加载资源路径（供 views 或其他地方使用）
+BG_PATH = get_resource_path("background.jpg")
+
 
 class WorkerThread(QThread):
     progress_updated = Signal(int, str)
@@ -449,6 +443,7 @@ class WorkerThread(QThread):
 class RefFormatterController:
     def __init__(self):
         self.app = QApplication(sys.argv)
+        # 如果你的 MainView 需要背景图，可以把 BG_PATH 传进去
         self.view = MainView()
         self.view.setup_ui()
         self.orchestrator = Orchestrator()
@@ -458,11 +453,11 @@ class RefFormatterController:
         self.view.show()
 
     def connect_signals(self):
-        if self.view.btn_convert:
+        if hasattr(self.view, 'btn_convert') and self.view.btn_convert:
             self.view.btn_convert.clicked.connect(self.start_batch_processing)
-        if self.view.btn_copy_with_num:
+        if hasattr(self.view, 'btn_copy_with_num') and self.view.btn_copy_with_num:
             self.view.btn_copy_with_num.clicked.connect(self.copy_result_with_num)
-        if self.view.btn_copy_no_num:
+        if hasattr(self.view, 'btn_copy_no_num') and self.view.btn_copy_no_num:
             self.view.btn_copy_no_num.clicked.connect(self.copy_result_no_num)
 
     def start_batch_processing(self):
@@ -476,7 +471,7 @@ class RefFormatterController:
         self.view.btn_copy_with_num.setEnabled(False)
         self.view.btn_copy_no_num.setEnabled(False)
         self.view.status_label.setText("🚀 启动中...")
-        self.view.set_output_text("")
+        self.view.set_output_text("")  # 清空
         self.view.last_result_label.setText("")
 
         self.worker = WorkerThread(self.orchestrator, raw_text)
@@ -504,7 +499,14 @@ class RefFormatterController:
 
     def on_finished(self, result_dict):
         self.current_results = result_dict
-        self.view.set_output_text(result_dict["with_num"])
+
+        # 【关键修改】使用 HTML 渲染，支持点击跳转
+        if "display_html" in result_dict:
+            self.view.set_output_html(result_dict["display_html"])
+        else:
+            # 兼容旧逻辑
+            self.view.set_output_text(result_dict["with_num"])
+
         self.view.status_label.setText("✅ 全部处理完毕")
         self.view.last_result_label.setText("")
 
@@ -522,19 +524,16 @@ class RefFormatterController:
         self.worker = None
 
     def copy_result_with_num(self):
-        """复制带序号文本 (自动去除界面显示用的额外空行)"""
+        # 复制时依然使用纯文本
         text = self.current_results.get("with_num", "")
         if text:
-            # 【关键修改】把双换行替换回单换行，实现紧凑复制
             clean_text = text.replace("\n\n", "\n")
             QApplication.clipboard().setText(clean_text)
             self.view.status_label.setText("📋 已复制 (带序号)")
 
     def copy_result_no_num(self):
-        """复制无序号文本 (自动去除界面显示用的额外空行)"""
         text = self.current_results.get("no_num", "")
         if text:
-            # 【关键修改】把双换行替换回单换行
             clean_text = text.replace("\n\n", "\n")
             QApplication.clipboard().setText(clean_text)
             self.view.status_label.setText("📋 已复制 (纯净版)")
@@ -546,14 +545,6 @@ class RefFormatterController:
 if __name__ == "__main__":
     controller = RefFormatterController()
     controller.run()
-```
-
----
-
-### 📄 `requirements.txt`
-
-```txt:requirements.txt
-
 ```
 
 ---
@@ -983,12 +974,103 @@ class CitationData:
 1. 姓氏全部大写 (EINSTEIN)
 2. 名字首字母大写，无缩写点 (A)
 3. 支持 van, von 等复姓识别
+4. 【精准版】支持中国学者拼音双名自动拆分 (Han Shaoheng -> HAN S H)
+   - 引入拼音字典校验，防止误伤外国名字 (如 Simona 不会被拆)
 =========================================================
 """
 
 import re
 import html
 from models.citation_model import CitationData
+
+# === 1. 数据准备 ===
+
+# 常见中国姓氏拼音 (大写)，用于触发检查
+# 包含百家姓 Top 200+，覆盖率极高，防止对纯老外名字触发拼音检测
+COMMON_CN_SURNAMES = {
+    "LI", "WANG", "ZHANG", "LIU", "CHEN", "YANG", "ZHAO", "HUANG", "ZHOU", "WU",
+    "XU", "SUN", "HU", "ZHU", "GAO", "LIN", "HE", "GUO", "MA", "LUO",
+    "LIANG", "SONG", "ZHENG", "XIE", "HAN", "TANG", "FENG", "YU", "DONG", "XIAO",
+    "CHENG", "CAO", "YUAN", "DENG", "FU", "SHEN", "ZENG", "PENG", "LV",
+    "SU", "LU", "JIANG", "CAI", "JIA", "DING", "WEI", "XUE", "YE", "YAN",
+    "PAN", "DU", "DAI", "XIA", "ZHONG", "TIAN", "REN", "FAN", "FANG", "SHI",
+    "YAO", "TAN", "SHENG", "ZOU", "XIONG", "JIN", "HAO", "KONG", "BAI", "CUI",
+    "KANG", "MAO", "QIU", "QIN", "GU", "HOU", "SHAO", "MENG", "LONG", "WAN",
+    "DUAN", "QIAN", "YIN", "YI", "CHANG", "XI", "WEN", "NIE", "ZHUANG", "YAN",
+    "QU", "GE", "PU", "BA", "BIE", "BING", "BO", "BU", "CEN", "CHAI", "CHE",
+    "CHI", "CHU", "CHUAN", "CHUN", "CONG", "CUO", "DA", "DAN", "DAO", "DI",
+    "DIAN", "DIAO", "DIE", "DOU", "DU", "DUN", "E", "EN", "ER", "FA", "FEI",
+    "FO", "FOU", "GAI", "GAN", "GANG", "GEN", "GENG", "GONG", "GOU", "GUAN",
+    "GUI", "GUN", "HAI", "HANG", "HEI", "HEN", "HENG", "HONG", "HUA", "HUAI",
+    "HUAN", "HUI", "HUN", "HUO", "JI", "JIAN", "JIANG", "JIAO", "JIE", "JING",
+    "JIONG", "JIU", "JU", "JUAN", "JUE", "JUN", "KA", "KAI", "KAN", "KAO", "KE",
+    "KEN", "KENG", "KOU", "KU", "KUA", "KUAI", "KUAN", "KUANG", "KUI", "KUN",
+    "KUO", "LA", "LAI", "LAN", "LANG", "LAO", "LE", "LEI", "LENG", "LIA", "LIAN",
+    "LIAO", "LIE", "LIN", "LING", "LIU", "LONG", "LOU", "LUAN", "LUE", "LUN",
+    "LUO", "MEI", "MEN", "MENG", "MI", "MIAN", "MIAO", "MIE", "MIN", "MING", "MIU",
+    "MO", "MOU", "MU", "NA", "NAI", "NAN", "NANG", "NAO", "NE", "NEI", "NEN",
+    "NENG", "NI", "NIAN", "NIANG", "NIAO", "NIE", "NIN", "NING", "NIU", "NONG",
+    "NOU", "NU", "NUAN", "NUE", "NUO", "OU", "PA", "PAI", "PAN", "PANG", "PAO",
+    "PEI", "PEN", "PENG", "PI", "PIAN", "PIAO", "PIE", "PIN", "PING", "PO", "POU",
+    "QI", "QIA", "QIAN", "QIANG", "QIAO", "QIE", "QIN", "QING", "QIONG", "QIU",
+    "QU", "QUAN", "QUE", "QUN", "RAN", "RANG", "RAO", "RE", "REN", "RENG", "RI",
+    "RONG", "ROU", "RU", "RUAN", "RUI", "RUN", "RUO", "SA", "SAI", "SAN", "SANG",
+    "SAO", "SE", "SEN", "SENG", "SHA", "SHAI", "SHAN", "SHANG", "SHE", "SHEI",
+    "SHEN", "SHU", "SHUA", "SHUAI", "SHUAN", "SHUANG", "SHUI", "SHUN", "SHUO",
+    "SI", "SONG", "SOU", "SUAN", "SUI", "SUN", "SUO", "TA", "TAI", "TAN", "TANG",
+    "TAO", "TE", "TENG", "TI", "TIAN", "TIAO", "TIE", "TING", "TONG", "TOU", "TU",
+    "TUAN", "TUI", "TUN", "TUO", "WA", "WAI", "WAN", "WANG", "WEI", "WEN", "WENG",
+    "WO", "WU", "XI", "XIA", "XIAN", "XIANG", "XIAO", "XIE", "XIN", "XING", "XIONG",
+    "XIU", "XU", "XUAN", "XUE", "XUN", "YA", "YAN", "YANG", "YAO", "YE", "YI",
+    "YIN", "YING", "YONG", "YOU", "YU", "YUAN", "YUE", "YUN", "ZA", "ZAI", "ZAN",
+    "ZANG", "ZAO", "ZE", "ZEI", "ZEN", "ZENG", "ZHA", "ZHAI", "ZHAN", "ZHANG",
+    "ZHAO", "ZHE", "ZHEI", "ZHEN", "ZHENG", "ZHI", "ZHONG", "ZHOU", "ZHU", "ZHUA",
+    "ZHUAI", "ZHUAN", "ZHUANG", "ZHUI", "ZHUN", "ZHUO", "ZI", "ZONG", "ZOU", "ZU",
+    "ZUAN", "ZUI", "ZUN", "ZUO"
+}
+
+# 全量合法拼音音节表 (无声调)
+# 来源：标准汉语拼音方案
+VALID_PINYINS = {
+    "a", "ai", "an", "ang", "ao", "ba", "bai", "ban", "bang", "bao", "bei", "ben",
+    "beng", "bi", "bian", "biao", "bie", "bin", "bing", "bo", "bu", "ca", "cai",
+    "can", "cang", "cao", "ce", "cen", "ceng", "cha", "chai", "chan", "chang",
+    "chao", "che", "chen", "cheng", "chi", "chong", "chou", "chu", "chua", "chuai",
+    "chuan", "chuang", "chui", "chun", "chuo", "ci", "cong", "cou", "cu", "cuan",
+    "cui", "cun", "cuo", "da", "dai", "dan", "dang", "dao", "de", "dei", "deng",
+    "di", "dian", "diao", "die", "ding", "diu", "dong", "dou", "du", "duan", "dui",
+    "dun", "duo", "e", "ei", "en", "eng", "er", "fa", "fan", "fang", "fei", "fen",
+    "feng", "fo", "fou", "fu", "ga", "gai", "gan", "gang", "gao", "ge", "gei",
+    "gen", "geng", "gong", "gou", "gu", "gua", "guai", "guan", "guang", "gui",
+    "gun", "guo", "ha", "hai", "han", "hang", "hao", "he", "hei", "hen", "heng",
+    "hong", "hou", "hu", "hua", "huai", "huan", "huang", "hui", "hun", "huo", "ji",
+    "jia", "jian", "jiang", "jiao", "jie", "jin", "jing", "jiong", "jiu", "ju",
+    "juan", "jue", "jun", "ka", "kai", "kan", "kang", "kao", "ke", "ken", "keng",
+    "kong", "kou", "ku", "kua", "kuai", "kuan", "kuang", "kui", "kun", "kuo", "la",
+    "lai", "lan", "lang", "lao", "le", "lei", "leng", "li", "lia", "lian", "liang",
+    "liao", "lie", "lin", "ling", "liu", "long", "lou", "lu", "luan", "lue", "lun",
+    "luo", "lv", "ma", "mai", "man", "mang", "mao", "me", "mei", "men", "meng",
+    "mi", "mian", "miao", "mie", "min", "ming", "miu", "mo", "mou", "mu", "na",
+    "nai", "nan", "nang", "nao", "ne", "nei", "nen", "neng", "ni", "nian", "niang",
+    "niao", "nie", "nin", "ning", "niu", "nong", "nou", "nu", "nuan", "nue", "nuo",
+    "nv", "o", "ou", "pa", "pai", "pan", "pang", "pao", "pei", "pen", "peng", "pi",
+    "pian", "piao", "pie", "pin", "ping", "po", "pou", "pu", "qi", "qia", "qian",
+    "qiang", "qiao", "qie", "qin", "qing", "qiong", "qiu", "qu", "quan", "que",
+    "qun", "ran", "rang", "rao", "re", "ren", "reng", "ri", "rong", "rou", "ru",
+    "ruan", "rui", "run", "ruo", "sa", "sai", "san", "sang", "sao", "se", "sen",
+    "seng", "sha", "shai", "shan", "shang", "shao", "she", "shei", "shen", "sheng",
+    "shi", "shou", "shu", "shua", "shuai", "shuan", "shuang", "shui", "shun",
+    "shuo", "si", "song", "sou", "su", "suan", "sui", "sun", "suo", "ta", "tai",
+    "tan", "tang", "tao", "te", "teng", "ti", "tian", "tiao", "tie", "ting",
+    "tong", "tou", "tu", "tuan", "tui", "tun", "tuo", "wa", "wai", "wan", "wang",
+    "wei", "wen", "weng", "wo", "wu", "xi", "xia", "xian", "xiang", "xiao", "xie",
+    "xin", "xing", "xiong", "xiu", "xu", "xuan", "xue", "xun", "ya", "yan", "yang",
+    "yao", "ye", "yi", "yin", "ying", "yong", "you", "yu", "yuan", "yue", "yun",
+    "za", "zai", "zan", "zang", "zao", "ze", "zei", "zen", "zeng", "zha", "zhai",
+    "zhan", "zhang", "zhao", "zhe", "zhei", "zhen", "zheng", "zhi", "zhong",
+    "zhou", "zhu", "zhua", "zhuai", "zhuan", "zhuang", "zhui", "zhun", "zhuo",
+    "zi", "zong", "zou", "zu", "zuan", "zui", "zun", "zuo"
+}
 
 
 def clean_text(text: str) -> str:
@@ -1000,12 +1082,50 @@ def clean_text(text: str) -> str:
     return clean_str.strip()
 
 
+def try_split_pinyin(given_name: str) -> str:
+    """
+    【智能拼音拆分 - 严格校验版】
+    尝试将连写的拼音双名拆开。
+    策略：
+    1. 遍历所有可能的分割点。
+    2. 只有当拆分出的【两部分】都在 VALID_PINYINS 字典中时，才视为有效拆分。
+    3. 防止将 "Simona" 误拆为 "Si mona" (mona 不是拼音)。
+    """
+    given_name = given_name.strip()
+    length = len(given_name)
+
+    # 拼音音节最短2字母(除了a,o,e)，最长6字母(zhuang)。
+    # 双名总长度至少4 (如 bo yi)，通常不超过12。
+    if length < 3 or length > 12:
+        return given_name
+
+    # 尝试从第2个字符到倒数第2个字符进行切分
+    # 例如 "Shaoheng" (len 8)
+    # i=2: Sh, aoheng (No)
+    # i=4: Shao, heng (Yes!)
+
+    # 优先寻找最合理的切分。
+    # 从前往后切
+    for i in range(1, length):
+        part1 = given_name[:i].lower()
+        part2 = given_name[i:].lower()
+
+        # 核心校验：两部分必须都是合法拼音
+        if part1 in VALID_PINYINS and part2 in VALID_PINYINS:
+            # 找到合法拆分！直接返回
+            return f"{given_name[:i]} {given_name[i:]}"
+
+    # 如果找不到合法拆分，保持原样
+    return given_name
+
+
 def format_western_name(name_str: str) -> str:
     """
-    【姓名整形师 V4.0】
+    【姓名整形师 V5.0】
     将外文姓名转换为 GB/T 7714 格式 (严格全大写)
-    输入: "Ludwig van Beethoven"
-    输出: "VAN BEETHOVEN L"
+    输入: "Ludwig van Beethoven" -> 输出: "VAN BEETHOVEN L"
+    输入: "Han Shaoheng"         -> 输出: "HAN S H"
+    输入: "Lee Simona"           -> 输出: "LEE S" (Simona 不是双名，不拆)
     """
     name_str = clean_text(name_str)
     if not name_str:
@@ -1034,7 +1154,6 @@ def format_western_name(name_str: str) -> str:
         if len(tokens) == 1: return tokens[0].upper()
 
         # 智能检测复姓 (查看倒数第二个词是否是前缀)
-        # 例如: ["Ludwig", "van", "Beethoven"]
         if len(tokens) > 2 and tokens[-2].lower() in surname_prefixes:
             # 姓是最后两个词: "van Beethoven"
             family = " ".join(tokens[-2:])
@@ -1048,9 +1167,17 @@ def format_western_name(name_str: str) -> str:
     # 1. 姓: 全大写
     family_fmt = family.upper()
 
-    # 2. 名: 首字母大写，无缩写点
+    # 2. 名: 处理逻辑
+    # 【新增】针对中国学者拼音双名连写的特殊优化
+    # 条件：姓氏是常见中国姓，且名字没有空格/连字符
+    if family_fmt in COMMON_CN_SURNAMES and ' ' not in given and '-' not in given:
+        given = try_split_pinyin(given)
+
+    # 清理分隔符，统一变空格 (处理 Jean-Pierre -> Jean Pierre)
     given_clean = given.replace('.', ' ').replace('-', ' ')
     given_tokens = given_clean.split()
+
+    # 提取首字母
     given_initials = [t[0].upper() for t in given_tokens if t]
     given_fmt = " ".join(given_initials)
 
@@ -1109,6 +1236,66 @@ def to_gbt7714(data: CitationData) -> str:
 
     result += "."
     return result
+
+
+# ==============================================================================
+# 自查测试模块 (Run this file to verify)
+# ==============================================================================
+if __name__ == "__main__":
+    print("🚀 开始自查测试 (Formatter Self-Check)...\n")
+
+    test_cases = [
+        # --- 组1: 标准中国双名 (连写) ---
+        ("Han Shaoheng", "HAN S H", "双名连写 - 基础"),
+        ("Li Xiaolong", "LI X L", "双名连写 - Xiao"),
+        ("Zhang Ziyi", "ZHANG Z Y", "双名连写 - Zi yi"),
+        ("Wang Jingwei", "WANG J W", "双名连写 - Jing wei"),
+        ("Chen Guangkun", "CHEN G K", "双名连写 - Guang kun"),
+
+        # --- 组2: 中国单名 (不应拆) ---
+        ("Wang Jing", "WANG J", "单名 - 不应拆分"),
+        ("Li Wei", "LI W", "单名 - 不应拆分"),
+
+        # --- 组3: 外国名 (不应误拆) ---
+        ("Lee Simona", "LEE S", "外国名 Simona - 不应拆为 S M"),
+        ("Han Solo", "HAN S", "外国名 Solo - 不应拆为 S L"),
+        ("James Lebron", "JAMES L", "外国名 Lebron - bron非拼音，不拆"),
+        ("Tan Christopher", "TAN C", "外国名 Christopher - 不拆"),
+        ("Albert Einstein", "EINSTEIN A", "标准外国名"),
+        ("Ludwig van Beethoven", "VAN BEETHOVEN L", "带前缀的复姓"),
+
+        # --- 组4: 已有格式 (保持原样) ---
+        ("Han, Shao-Heng", "HAN S H", "已有连字符"),
+        ("Han, Shao Heng", "HAN S H", "已有空格"),
+
+        # --- 组5: 复杂拼音边界 ---
+        ("Lin Yingying", "LIN Y Y", "Ying ying"),
+        ("Xu Xian", "XU X", "Xian 是单字 - 不应拆为 Xi an"),
+        ("Fan Bingbing", "FAN B B", "Bing bing"),
+        ("Ma Yo-Yo", "MA Y Y", "Yo-Yo 连字符")
+    ]
+
+    success_count = 0
+    fail_count = 0
+
+    print(f"{'输入':<25} | {'预期':<15} | {'实际':<15} | {'结果'}")
+    print("-" * 75)
+
+    for raw_name, expected, note in test_cases:
+        actual = format_western_name(raw_name)
+        is_pass = (actual == expected)
+        status = "✅ PASS" if is_pass else "❌ FAIL"
+        if is_pass:
+            success_count += 1
+        else:
+            fail_count += 1
+
+        print(f"{raw_name:<25} | {expected:<15} | {actual:<15} | {status}")
+        if not is_pass:
+            print(f"   >>> 失败原因: {note}")
+
+    print("-" * 75)
+    print(f"测试结束: 成功 {success_count} / 总计 {len(test_cases)}")
 ```
 
 ---
@@ -1121,7 +1308,13 @@ def to_gbt7714(data: CitationData) -> str:
 =========================================================
 【接口说明】
 def format_batch(self, raw_text_block: str, callback_signal=None) -> dict:
-    '''批量处理，并在 callback_signal 中附带 [OK] 或 [FAIL] 标记'''
+    '''
+    批量处理
+    返回字典包含:
+    - "with_num": 纯文本（带序号） -> 用于复制
+    - "no_num":   纯文本（无序号） -> 用于复制
+    - "display_html": HTML格式（带链接） -> 用于界面显示
+    '''
 =========================================================
 """
 
@@ -1130,6 +1323,7 @@ import os
 import time
 import re
 import difflib
+import html  # 【新增】用于转义 HTML 特殊字符
 import config
 from services import formatter
 from services.api_engines.openalex_engine import OpenAlexEngine
@@ -1156,6 +1350,8 @@ class Orchestrator:
         lines = raw_text_block.split('\n')
         list_with_num = []
         list_no_num = []
+        list_html = []  # 【新增】用于存储 HTML 显示内容
+
         total = len(lines)
 
         for i, line in enumerate(lines):
@@ -1173,8 +1369,8 @@ class Orchestrator:
                 prefix = match.group(1)
                 clean_query = match.group(2)
 
-            # 处理单条
-            formatted_content, is_success = self._format_single_with_status(clean_query)
+            # 处理单条 (现在返回 3 个值: 文本, 是否成功, URL)
+            formatted_content, is_success, url = self._format_single_with_status(clean_query)
 
             # 通过 callback 发送状态: "PREV_OK" 或 "PREV_FAIL"
             if callback_signal:
@@ -1183,29 +1379,52 @@ class Orchestrator:
                 next_msg = f"正在处理: {clean_query[:15]}..."
                 callback_signal(progress, f"{status_tag}|{next_msg}")
 
-            # 存入列表
+            # 1. 构建纯文本结果 (用于复制)
             list_no_num.append(formatted_content)
-            if prefix:
-                list_with_num.append(f"{prefix} {formatted_content}")
+            full_text_line = f"{prefix} {formatted_content}" if prefix else formatted_content
+            list_with_num.append(full_text_line)
+
+            # 2. 构建 HTML 结果 (用于显示和点击)
+            # 使用 html.escape 防止标题中的 < > 等字符破坏 HTML 结构
+            safe_text = html.escape(full_text_line)
+
+            if is_success and url:
+                # 成功且有链接：包裹 <a> 标签，并加一个小的链接图标提示
+                # 样式说明：text-decoration:none 去掉下划线，颜色交给 CSS 控制
+                html_line = (
+                    f'<div style="margin-bottom: 12px;">'
+                    f'<a href="{url}" title="点击跳转原文: {url}">'
+                    f'{safe_text} <span style="font-size:12px; vertical-align:middle;">🔗</span>'
+                    f'</a>'
+                    f'</div>'
+                )
+            elif is_success:
+                # 成功但无链接
+                html_line = f'<div style="margin-bottom: 12px; color:#2c3e50;">{safe_text}</div>'
             else:
-                list_with_num.append(formatted_content)
+                # 失败：用灰色或红色显示，不加链接
+                html_line = f'<div style="margin-bottom: 12px; color:#7f8c8d;">{safe_text}</div>'
+
+            list_html.append(html_line)
 
             if i < total - 1:
                 time.sleep(config.MIN_REQUEST_INTERVAL)
 
         return {
             "with_num": "\n\n".join(list_with_num),
-            "no_num": "\n\n".join(list_no_num)
+            "no_num": "\n\n".join(list_no_num),
+            "display_html": "".join(list_html)  # HTML 不需要换行符，div 自带换行
         }
 
-    def _format_single_with_status(self, query: str) -> (str, bool):
+    def _format_single_with_status(self, query: str) -> (str, bool, str):
         """
-        内部辅助方法：处理单条并返回 (结果字符串, 是否成功)
+        内部辅助方法
+        返回: (格式化后的文本, 是否成功, 原文URL)
         """
         if not self.engines:
-            return f"{query} ❌ (未启用API)", False
+            return f"{query} ❌ (未启用API)", False, ""
         if len(query) < 4:
-            return f"{query} ❌", False
+            return f"{query} ❌", False, ""
 
         is_pure_doi = "10." in query and "/" in query and len(query.split()) < 2
         if is_pure_doi: query = query.strip()
@@ -1216,19 +1435,19 @@ class Orchestrator:
                 if citation_data:
                     is_match, reason = self._validate_result(query, citation_data)
                     if is_match:
-                        # 成功！
-                        return formatter.to_gbt7714(citation_data), True
+                        # 成功！返回 URL
+                        return formatter.to_gbt7714(citation_data), True, citation_data.url
                     else:
                         continue
             except Exception:
                 continue
 
         # 失败
-        return f"{query} ❌", False
+        return f"{query} ❌", False, ""
 
     def format_single(self, query: str) -> str:
         """兼容旧接口"""
-        res, _ = self._format_single_with_status(query)
+        res, _, _ = self._format_single_with_status(query)
         return res
 
     def _validate_result(self, user_query: str, data) -> (bool, str):
@@ -2380,6 +2599,13 @@ class BaseSplashScreen(QSplashScreen):
 ### 📄 `ui_framework\base_window.py`
 
 ```python:ui_framework\base_window.py
+# ui_framework/base_window.py
+# ==============================================================================
+# 修改说明:
+# 1. 新增 resource_path 函数: 专门解决打包后找不到资源路径的问题
+# 2. 修改 __init__ 中的 bg_path: 使用 resource_path 包裹文件名
+# ==============================================================================
+
 import os
 import sys
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
@@ -2387,6 +2613,21 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout,
 from PySide6.QtGui import (QAction, QColor, QPixmap, QPainter,
                            QGuiApplication)
 from PySide6.QtCore import Qt, QSize
+
+
+def resource_path(relative_path):
+    """
+    【核心修复代码】资源路径导航仪
+    获取资源的绝对路径。
+    - 开发环境: 返回当前文件所在的相对路径
+    - 打包环境(PyInstaller): 返回解压后的临时路径 (sys._MEIPASS)
+    """
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller 打包后的临时路径
+        return os.path.join(sys._MEIPASS, relative_path)
+
+    # 普通开发环境
+    return os.path.join(os.path.abspath("."), relative_path)
 
 
 class BaseMainWindow(QMainWindow):
@@ -2411,9 +2652,9 @@ class BaseMainWindow(QMainWindow):
         self.bg_pixmap = None
         self.show_bg_image = True
 
-        # 【修改】路径改为根目录下的 background.jpg
-        # 假设程序是从根目录运行的 (python main.py)，直接使用文件名即可
-        bg_path = "background.jpg"
+        # 【修改点】: 使用 resource_path 获取真正的路径
+        # 即使打包成 exe，也能在临时目录找到 background.jpg
+        bg_path = resource_path("background.jpg")
 
         # 简单的存在性检查
         if os.path.exists(bg_path):
@@ -2460,7 +2701,7 @@ class BaseMainWindow(QMainWindow):
 
         # 绘制背景图 (如果有)
         if self.show_bg_image and self.bg_pixmap and not self.bg_pixmap.isNull():
-            # 【修改】将不透明度设置为 0.06
+            # 【修改】将不透明度设置为 0.15，保持原来的淡淡的效果
             painter.setOpacity(0.15)
 
             # 保持比例铺满窗口
@@ -2793,13 +3034,13 @@ def create_datetime_edit(init_dt=None, display_format="yyyy-MM-dd HH:mm"):
 ```python:views\main_view.py
 # views/main_view.py
 # ==============================================================================
-# 模块名称: 主界面视图 (View) - 全局透明化版
-# 功能描述:
-#   1. 主卡片背景调整为 0.8 透明度
-#   2. 【关键】输入框和输出框也调整为半透明，确保背景图能透视出来
+# 模块名称: 主界面视图 (View) - 修复版
+# 修复内容:
+#   1. 将输出框改为 QTextBrowser 以支持 setOpenExternalLinks
+#   2. 更新 CSS 样式以兼容 QTextBrowser
 # ==============================================================================
 
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QTextBrowser,
                                QPushButton, QLabel, QFrame, QGraphicsDropShadowEffect,
                                QSizePolicy)
 from PySide6.QtCore import Qt
@@ -2829,8 +3070,7 @@ class MainView(BaseMainWindow):
         card_widget = QFrame()
         card_widget.setObjectName("MainCard")
 
-        # 【修改 1】降低大卡片的不透明度 (0.9 -> 0.8)
-        # 这样底色会更透一些
+        # 降低大卡片的不透明度
         card_widget.setStyleSheet("""
             #MainCard {
                 background-color: rgba(255, 255, 255, 0.6);
@@ -2860,7 +3100,7 @@ class MainView(BaseMainWindow):
             "font-family: 'Microsoft YaHei'; font-size: 20px; font-weight: bold; color: #2c3e50; border: none; background: transparent;")
         title_label.setAlignment(Qt.AlignCenter)
 
-        subtitle_label = QLabel("杂乱格式/残缺文本  >>>  《GB/T 7714-2015》规范格式    |    API 直连无需验证码")
+        subtitle_label = QLabel("杂乱格式/残缺文本  >>>  《GB/T 7714-2015》规范格式    |    点击结果可直达原文")
         subtitle_label.setStyleSheet("color: #7f8c8d; font-size: 12px; border: none; background: transparent;")
         subtitle_label.setAlignment(Qt.AlignCenter)
 
@@ -2919,7 +3159,7 @@ class MainView(BaseMainWindow):
         right_header_layout = QHBoxLayout()
         right_header_layout.setContentsMargins(0, 0, 0, 0)
 
-        lb_output = QLabel("✅ 《GB/T 7714-2015》国标结果:")
+        lb_output = QLabel("✅ 国标结果 (点击跳转):")
         lb_output.setStyleSheet(
             "font-weight: bold; color: #27ae60; font-size: 13px; border: none; background: transparent;")
 
@@ -2944,8 +3184,15 @@ class MainView(BaseMainWindow):
         right_header_layout.addWidget(self.btn_copy_with_num)
         right_header_layout.addWidget(self.btn_copy_no_num)
 
-        self.output_edit = QTextEdit()
+        # 【核心修改】这里改为 QTextBrowser，它才支持 setOpenExternalLinks
+        self.output_edit = QTextBrowser()
         self.output_edit.setPlaceholderText("干净规整的参考文献即将出现...")
+
+        # 允许打开外部链接
+        self.output_edit.setOpenExternalLinks(True)
+        # QTextBrowser 默认就是只读的，但写上也无妨
+        self.output_edit.setReadOnly(True)
+
         # 调用支持透明样式的函数
         self.output_edit.setStyleSheet(self._get_editor_style(True))
 
@@ -2983,25 +3230,26 @@ class MainView(BaseMainWindow):
 
     def _get_editor_style(self, is_read_only=False):
         """
-        【关键修改】这里将原本的 HEX 颜色 (如 #ffffff) 改为了 rgba 颜色。
-        rgba(255, 255, 255, 0.6) 表示白色，不透明度 0.6。
-        只有这样，大卡片的背景图才能透过来。
+        获取编辑器样式。
+        【关键修改】:
+        1. 使用 rgba 背景色以透出大卡片的模糊背景。
+        2. 新增 'a' 标签样式：默认深灰色，悬停时变成蓝色下划线。
+        3. 增加对 QTextBrowser 的支持。
         """
         if is_read_only:
-            # 只读模式（右侧）：稍微灰一点的半透明
+            # 只读模式（右侧）：稍微灰一点
             bg_color = "rgba(249, 250, 252, 0.4)"
         else:
-            # 编辑模式（左侧）：更通透的白色半透明
+            # 编辑模式（左侧）：更通透的白色
             bg_color = "rgba(255, 255, 255, 0.4)"
 
         # 边框聚焦颜色
         border_focus = "#2ecc71" if is_read_only else "#3498db"
-
-        # 聚焦时，把背景稍微变实一点 (0.9)，方便看清文字
         bg_focus = "rgba(255, 255, 255, 0.9)"
 
+        # 下面这行同时作用于 QTextEdit (输入框) 和 QTextBrowser (输出框)
         return f"""
-            QTextEdit {{
+            QTextEdit, QTextBrowser {{
                 background-color: {bg_color}; 
                 color: #2c3e50; 
                 border: 1px solid rgba(220, 223, 230, 0.8);
@@ -3010,9 +3258,20 @@ class MainView(BaseMainWindow):
                 font-family: "Consolas", "Microsoft YaHei"; 
                 font-size: 14px;
             }}
-            QTextEdit:focus {{ 
+            QTextEdit:focus, QTextBrowser:focus {{ 
                 border: 1px solid {border_focus}; 
                 background-color: {bg_focus}; 
+            }}
+            /* 【链接样式美化】 */
+            a {{
+                color: #2c3e50;         /* 默认链接颜色：深灰 (看起来像普通文字) */
+                text-decoration: none;  /* 去掉下划线 */
+                font-weight: normal;
+            }}
+            a:hover {{
+                color: #3498db;         /* 悬停时：变蓝 */
+                text-decoration: underline; /* 悬停时：加下划线 */
+                cursor: pointer;
             }}
         """
 
@@ -3020,7 +3279,15 @@ class MainView(BaseMainWindow):
         return self.input_edit.toPlainText().strip() if self.input_edit else ""
 
     def set_output_text(self, text):
+        """设置纯文本 (旧接口保留)"""
         if self.output_edit: self.output_edit.setPlainText(text)
+
+    def set_output_html(self, html_content):
+        """
+        【新增】设置 HTML 内容 (支持链接)
+        """
+        if self.output_edit:
+            self.output_edit.setHtml(html_content)
 ```
 
 ---

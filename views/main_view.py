@@ -1,12 +1,12 @@
 # views/main_view.py
 # ==============================================================================
-# 模块名称: 主界面视图 (View) - 全局透明化版
-# 功能描述:
-#   1. 主卡片背景调整为 0.8 透明度
-#   2. 【关键】输入框和输出框也调整为半透明，确保背景图能透视出来
+# 模块名称: 主界面视图 (View) - 布局修复版
+# 修复内容:
+#   1. 【重要】找回了消失的右侧标题和按钮（之前漏写了 addWidget）。
+#   2. 保持了“✅ 国标输出...”的新文案和灰色链接样式。
 # ==============================================================================
 
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QTextBrowser,
                                QPushButton, QLabel, QFrame, QGraphicsDropShadowEffect,
                                QSizePolicy)
 from PySide6.QtCore import Qt
@@ -36,8 +36,7 @@ class MainView(BaseMainWindow):
         card_widget = QFrame()
         card_widget.setObjectName("MainCard")
 
-        # 【修改 1】降低大卡片的不透明度 (0.9 -> 0.8)
-        # 这样底色会更透一些
+        # 降低大卡片的不透明度
         card_widget.setStyleSheet("""
             #MainCard {
                 background-color: rgba(255, 255, 255, 0.6);
@@ -67,7 +66,7 @@ class MainView(BaseMainWindow):
             "font-family: 'Microsoft YaHei'; font-size: 20px; font-weight: bold; color: #2c3e50; border: none; background: transparent;")
         title_label.setAlignment(Qt.AlignCenter)
 
-        subtitle_label = QLabel("杂乱格式/残缺文本  >>>  《GB/T 7714-2015》规范格式    |    API 直连无需验证码")
+        subtitle_label = QLabel("杂乱格式/残缺文本  >>>  《GB/T 7714-2015》规范格式    |    点击结果可直达原文")
         subtitle_label.setStyleSheet("color: #7f8c8d; font-size: 12px; border: none; background: transparent;")
         subtitle_label.setAlignment(Qt.AlignCenter)
 
@@ -126,7 +125,8 @@ class MainView(BaseMainWindow):
         right_header_layout = QHBoxLayout()
         right_header_layout.setContentsMargins(0, 0, 0, 0)
 
-        lb_output = QLabel("✅ 《GB/T 7714-2015》国标结果:")
+        # 标题控件
+        lb_output = QLabel("✅ 国标输出（点击即可前往原文）")
         lb_output.setStyleSheet(
             "font-weight: bold; color: #27ae60; font-size: 13px; border: none; background: transparent;")
 
@@ -146,13 +146,25 @@ class MainView(BaseMainWindow):
         self.btn_copy_with_num.setEnabled(False)
         self.btn_copy_no_num.setEnabled(False)
 
+        # 【核心修复】将这些控件真正添加到布局中
         right_header_layout.addWidget(lb_output)
         right_header_layout.addStretch()
         right_header_layout.addWidget(self.btn_copy_with_num)
         right_header_layout.addWidget(self.btn_copy_no_num)
 
-        self.output_edit = QTextEdit()
+        # 输出框
+        self.output_edit = QTextBrowser()
         self.output_edit.setPlaceholderText("干净规整的参考文献即将出现...")
+
+        # 允许打开外部链接
+        self.output_edit.setOpenExternalLinks(True)
+        self.output_edit.setReadOnly(True)
+
+        # 使用 setDefaultStyleSheet 设置默认链接样式
+        self.output_edit.document().setDefaultStyleSheet(
+            "a { color: #606266; text-decoration: none; font-weight: normal; }"
+        )
+
         # 调用支持透明样式的函数
         self.output_edit.setStyleSheet(self._get_editor_style(True))
 
@@ -190,25 +202,21 @@ class MainView(BaseMainWindow):
 
     def _get_editor_style(self, is_read_only=False):
         """
-        【关键修改】这里将原本的 HEX 颜色 (如 #ffffff) 改为了 rgba 颜色。
-        rgba(255, 255, 255, 0.6) 表示白色，不透明度 0.6。
-        只有这样，大卡片的背景图才能透过来。
+        获取编辑器样式。
         """
         if is_read_only:
-            # 只读模式（右侧）：稍微灰一点的半透明
+            # 只读模式（右侧）：稍微灰一点
             bg_color = "rgba(249, 250, 252, 0.4)"
         else:
-            # 编辑模式（左侧）：更通透的白色半透明
+            # 编辑模式（左侧）：更通透的白色
             bg_color = "rgba(255, 255, 255, 0.4)"
 
         # 边框聚焦颜色
         border_focus = "#2ecc71" if is_read_only else "#3498db"
-
-        # 聚焦时，把背景稍微变实一点 (0.9)，方便看清文字
         bg_focus = "rgba(255, 255, 255, 0.9)"
 
         return f"""
-            QTextEdit {{
+            QTextEdit, QTextBrowser {{
                 background-color: {bg_color}; 
                 color: #2c3e50; 
                 border: 1px solid rgba(220, 223, 230, 0.8);
@@ -217,7 +225,7 @@ class MainView(BaseMainWindow):
                 font-family: "Consolas", "Microsoft YaHei"; 
                 font-size: 14px;
             }}
-            QTextEdit:focus {{ 
+            QTextEdit:focus, QTextBrowser:focus {{ 
                 border: 1px solid {border_focus}; 
                 background-color: {bg_focus}; 
             }}
@@ -227,4 +235,12 @@ class MainView(BaseMainWindow):
         return self.input_edit.toPlainText().strip() if self.input_edit else ""
 
     def set_output_text(self, text):
+        """设置纯文本 (旧接口保留)"""
         if self.output_edit: self.output_edit.setPlainText(text)
+
+    def set_output_html(self, html_content):
+        """
+        【新增】设置 HTML 内容 (支持链接)
+        """
+        if self.output_edit:
+            self.output_edit.setHtml(html_content)

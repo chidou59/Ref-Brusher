@@ -2,12 +2,14 @@
 # ==============================================================================
 # 可用接口:
 # - build_exe(): 核心打包函数，自动处理依赖、图标、图片并调用 PyInstaller
+#   (新增功能：如果程序未关闭，会提示用户重试，而不是直接报错)
 # ==============================================================================
 
 import os
 import sys
 import subprocess
 import shutil
+import time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 APP_NAME = os.path.basename(BASE_DIR)
@@ -18,15 +20,31 @@ def build_exe():
     print(f"🚀 启动打包工具 [目录: {BASE_DIR}]")
     os.chdir(BASE_DIR)
 
-    # 0. 清理旧的构建文件，防止缓存导致 ModuleNotFoundError
+    # 0. 清理旧的构建文件 (带重试机制)
     for folder in ['build', 'dist']:
         if os.path.exists(folder):
             print(f"🧹 正在清理 {folder} 文件夹...")
-            shutil.rmtree(folder)
+            while True:
+                try:
+                    shutil.rmtree(folder)
+                    break  # 成功删除，跳出循环
+                except PermissionError:
+                    print(f"\n⚠️ 无法删除 {folder}，因为它可能正在被占用。")
+                    print("👉 请检查是否还没关闭之前的程序？(Ref-Brusher.exe)")
+                    user_input = input("❌ 请关闭程序后按回车键重试 (输入 n 退出): ")
+                    if user_input.lower() == 'n':
+                        print("🚫 打包已取消。")
+                        return
+                except Exception as e:
+                    print(f"❌ 清理出错: {e}")
+                    return
 
     # 1. 确保环境里有 PySide6 和 PyInstaller
     print("📦 检查并安装必要环境...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "PySide6", "pyinstaller"])
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "PySide6", "pyinstaller"])
+    except subprocess.CalledProcessError:
+        print("⚠️ 安装库时出现警告，尝试继续...")
 
     # 2. 自动识别图标
     icon_file = None
@@ -37,11 +55,12 @@ def build_exe():
             break
 
     # 3. 选择模式
-    print("\n1. 单文件模式 (Onefile) | 2. 文件夹模式 (Onedir)")
+    print("\n1. 单文件模式 (Onefile) - 只有一个exe，清爽但启动稍慢")
+    print("2. 文件夹模式 (Onedir)  - 一个文件夹，启动快但在文件夹里找exe")
     user_choice = input("请输入选项 [默认 1]: ").strip()
     mode_arg = "--onedir" if user_choice == "2" else "--onefile"
 
-    # 4. 构建命令 (关键修改：使用 sys.executable 调用模块)
+    # 4. 构建命令
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--noconsole",

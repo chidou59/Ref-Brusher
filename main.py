@@ -14,6 +14,7 @@ from PySide6.QtCore import QThread, Signal, QObject, Qt
 from views.main_view import MainView
 from services.orchestrator import Orchestrator
 
+
 def get_resource_path(relative_path):
     """ 获取资源绝对路径，解决打包后找不到文件的问题 """
     if hasattr(sys, '_MEIPASS'):
@@ -22,8 +23,10 @@ def get_resource_path(relative_path):
     # 开发环境下的当前路径
     return os.path.join(os.path.abspath("."), relative_path)
 
+
 # 预加载资源路径（供 views 或其他地方使用）
 BG_PATH = get_resource_path("background.jpg")
+
 
 class WorkerThread(QThread):
     progress_updated = Signal(int, str)
@@ -47,6 +50,7 @@ class WorkerThread(QThread):
             self.result_ready.emit(final_result)
         except Exception as e:
             self.error_occurred.emit(str(e))
+
 
 class RefFormatterController:
     def __init__(self):
@@ -79,7 +83,7 @@ class RefFormatterController:
         self.view.btn_copy_with_num.setEnabled(False)
         self.view.btn_copy_no_num.setEnabled(False)
         self.view.status_label.setText("🚀 启动中...")
-        self.view.set_output_text("")
+        self.view.set_output_text("")  # 清空
         self.view.last_result_label.setText("")
 
         self.worker = WorkerThread(self.orchestrator, raw_text)
@@ -107,7 +111,14 @@ class RefFormatterController:
 
     def on_finished(self, result_dict):
         self.current_results = result_dict
-        self.view.set_output_text(result_dict["with_num"])
+
+        # 【关键修改】使用 HTML 渲染，支持点击跳转
+        if "display_html" in result_dict:
+            self.view.set_output_html(result_dict["display_html"])
+        else:
+            # 兼容旧逻辑
+            self.view.set_output_text(result_dict["with_num"])
+
         self.view.status_label.setText("✅ 全部处理完毕")
         self.view.last_result_label.setText("")
 
@@ -125,6 +136,7 @@ class RefFormatterController:
         self.worker = None
 
     def copy_result_with_num(self):
+        # 复制时依然使用纯文本
         text = self.current_results.get("with_num", "")
         if text:
             clean_text = text.replace("\n\n", "\n")
@@ -140,6 +152,7 @@ class RefFormatterController:
 
     def run(self):
         sys.exit(self.app.exec())
+
 
 if __name__ == "__main__":
     controller = RefFormatterController()
