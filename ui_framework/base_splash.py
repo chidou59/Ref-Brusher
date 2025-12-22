@@ -3,7 +3,7 @@ from PySide6.QtGui import QPixmap, QPainter, QColor, QFont, QLinearGradient, QBr
 from PySide6.QtCore import Qt, QRect
 
 class BaseSplashScreen(QSplashScreen):
-    def __init__(self, title="韩劭恒", subtitle="New Project v1.0", icon="🚀"):
+    def __init__(self, title="韩劭恒", subtitle="New Project v2.0", icon="🚀"):
         """
         通用启动页模板
         :param title: 主标题文字

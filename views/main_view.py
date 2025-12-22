@@ -18,7 +18,7 @@ from ui_framework.base_window import BaseMainWindow
 class MainView(BaseMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("参考文献国标刷 v.1.0")
+        self.setWindowTitle("参考文献国标刷 v2.0")
 
         # 控件变量
         self.input_edit = None

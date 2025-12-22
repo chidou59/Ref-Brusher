@@ -18,7 +18,7 @@
 │   PROJECT_FULL_CONTEXT.md
 │   Ref-Brusher.spec
 │   requirements.txt
-│   文献国标刷_v1.0.spec
+│   文献国标刷_v2.0.spec
 │   📂 core/
 │   │   verifier.py
 │   │   __init__.py
@@ -2524,7 +2524,7 @@ from PySide6.QtGui import QPixmap, QPainter, QColor, QFont, QLinearGradient, QBr
 from PySide6.QtCore import Qt, QRect
 
 class BaseSplashScreen(QSplashScreen):
-    def __init__(self, title="韩劭恒", subtitle="New Project v1.0", icon="🚀"):
+    def __init__(self, title="韩劭恒", subtitle="New Project v2.0", icon="🚀"):
         """
         通用启动页模板
         :param title: 主标题文字
@@ -3052,7 +3052,7 @@ from ui_framework.base_window import BaseMainWindow
 class MainView(BaseMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("参考文献国标刷 v.1.0")
+        self.setWindowTitle("参考文献国标刷 v2.0")
 
         # 控件变量
         self.input_edit = None
