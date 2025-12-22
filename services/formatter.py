@@ -9,6 +9,7 @@
 3. 支持 van, von 等复姓识别
 4. 【精准版】支持中国学者拼音双名自动拆分 (Han Shaoheng -> HAN S H)
    - 引入拼音字典校验，防止误伤外国名字 (如 Simona 不会被拆)
+   - 【V3.3 修复】防止单字被误拆 (Hao -> Ha o, Gang -> Ga ng)
 =========================================================
 """
 
@@ -130,6 +131,12 @@ def try_split_pinyin(given_name: str) -> str:
     # 拼音音节最短2字母(除了a,o,e)，最长6字母(zhuang)。
     # 双名总长度至少4 (如 bo yi)，通常不超过12。
     if length < 3 or length > 12:
+        return given_name
+
+    # 【核心修复 V3.3】
+    # 0. 优先判断：如果整个名字本身就是一个合法拼音，那就绝不要拆！
+    # 这能防止 "Hao" 被拆成 "Ha o"，"Gang" 被拆成 "Ga ng"
+    if given_name.lower() in VALID_PINYINS:
         return given_name
 
     # 尝试从第2个字符到倒数第2个字符进行切分
@@ -286,8 +293,11 @@ if __name__ == "__main__":
         ("Chen Guangkun", "CHEN G K", "双名连写 - Guang kun"),
 
         # --- 组2: 中国单名 (不应拆) ---
-        ("Wang Jing", "WANG J", "单名 - 不应拆分"),
-        ("Li Wei", "LI W", "单名 - 不应拆分"),
+        ("Meng Hao", "MENG H", "单名 - Hao (不应拆为 H O)"),
+        ("Liu Gang", "LIU G", "单名 - Gang (不应拆为 G ng)"),
+        ("Wang Jing", "WANG J", "单名 - Jing"),
+        ("Li Wei", "LI W", "单名 - Wei"),
+        ("Xu Xian", "XU X", "单名 - Xian"),
 
         # --- 组3: 外国名 (不应误拆) ---
         ("Lee Simona", "LEE S", "外国名 Simona - 不应拆为 S M"),
@@ -303,7 +313,6 @@ if __name__ == "__main__":
 
         # --- 组5: 复杂拼音边界 ---
         ("Lin Yingying", "LIN Y Y", "Ying ying"),
-        ("Xu Xian", "XU X", "Xian 是单字 - 不应拆为 Xi an"),
         ("Fan Bingbing", "FAN B B", "Bing bing"),
         ("Ma Yo-Yo", "MA Y Y", "Yo-Yo 连字符")
     ]
