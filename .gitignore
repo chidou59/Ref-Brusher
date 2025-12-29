@@ -180,3 +180,6 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 build_tool.py
+PROJECT_FULL_CONTEXT.md
+PROJECT_FULL_CONTEXT.md
+test.py

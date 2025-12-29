@@ -26,7 +26,6 @@ class CrossrefEngine(BaseEngine):
         super().__init__()
         self.name = "Crossref"
         self.api_url = config.SourceConfig.CROSSREF_API_URL
-        # Crossref 建议在 Header 中带上邮箱，进入 "Polite Pool"，速度更快且更稳定
         self.email = config.CONTACT_EMAIL
 
     def get_headers(self) -> dict:
@@ -39,20 +38,20 @@ class CrossrefEngine(BaseEngine):
         if not config.SourceConfig.CROSSREF_ENABLED:
             return None
 
-        # 1. 智能判断：如果是 DOI 格式，直接精确查询
-        # 简单判断是否包含 "10." 开头的 DOI 特征
-        is_doi = "10." in query and "/" in query
+        # 1. 智能判断：如果是 DOI 格式，直接精准查询
+        # 判断逻辑：包含 "10." 且包含 "/"，且不包含空格（或长度很短）
+        # Orchestrator 传进来的 DOI 应该是清洗过的，不含空格
+        is_pure_doi = "10." in query and "/" in query and " " not in query
 
         params = {}
-        if is_doi:
+        if is_pure_doi:
             # 如果看起来像 DOI，清理一下直接查
             clean_doi = query.strip()
-            # 移除可能的前缀
+            # 移除可能的前缀 (虽然 Orchestrator 已经移除了，这里双重保险)
             if "doi.org/" in clean_doi:
                 clean_doi = clean_doi.split("doi.org/")[-1]
 
-            # Crossref 单个作品查询不需要参数，直接拼在 URL 后面
-            # 但为了统一架构，我们还是用 query.bibliographic 搜索模式，容错率高
+            # Crossref 搜索模式，如果只有 query.bibliographic 放 DOI，通常能直接命中
             params = {
                 "query.bibliographic": clean_doi,
                 "rows": 1
@@ -66,7 +65,7 @@ class CrossrefEngine(BaseEngine):
                 "sort": "relevance"
             }
 
-        self.logger.info(f"[{self.name}] 正在请求 API: {query[:20]}...")
+        self.logger.info(f"[{self.name}] 正在请求 API ({'DOI模式' if is_pure_doi else '搜索模式'}): {query[:20]}...")
 
         # 2. 发送请求
         data = self.safe_request(self.api_url, params)
