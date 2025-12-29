@@ -1,5 +1,5 @@
 # 项目上下文文档
-生成时间: 2025-12-21 11:48:26
+生成时间: 2025-12-26 16:40:31
 
 > 注意：此文档包含项目的完整代码细节。请将此文件发送给 AI 助手以便进行代码修改。
 
@@ -11,14 +11,14 @@
 │   .gitignore
 │   build_tool.py
 │   config.py
-│   desktop.ini
 │   diagnose.py
 │   import_tool.py
 │   main.py
 │   PROJECT_FULL_CONTEXT.md
 │   Ref-Brusher.spec
 │   requirements.txt
-│   文献国标刷_v2.0.spec
+│   SampleManager_v2.1.spec
+│   文献国标刷_v1.0.spec
 │   📂 core/
 │   │   verifier.py
 │   │   __init__.py
@@ -62,105 +62,184 @@
 ### 📄 `build_tool.py`
 
 ```python:build_tool.py
-# build_tool.py
-# ==============================================================================
-# 可用接口:
-# - build_exe(): 核心打包函数，自动处理依赖、图标、图片并调用 PyInstaller
-#   (新增功能：如果程序未关闭，会提示用户重试，而不是直接报错)
-# ==============================================================================
-
 import os
 import sys
 import subprocess
-import shutil
-import time
+import glob  # 用于查找文件
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-APP_NAME = os.path.basename(BASE_DIR)
+# ==========================================
+# 👇 配置区 (通常不需要修改，脚本会自动检测)
+# ==========================================
+
+# 入口文件
 MAIN_FILE = "main.py"
-EXTRA_FILES = ["background.jpg"]
+
+# 默认生成的 EXE 名称 (如果不设置，脚本会尝试使用当前文件夹名字)
+APP_NAME_OVERRIDE = ""
+
+# 需要强制打包的背景图片名
+BG_IMAGE_NAME = "background.jpg"
+
+# 隐藏导入列表 (如果打包后闪退提示缺少模块，在这里添加)
+HIDDEN_IMPORTS = [
+    # "pandas",
+    # "matplotlib",
+]
+
+
+# ==========================================
+# 👆 配置结束
+# ==========================================
+
+def install_requirements():
+    """检查并安装 requirements.txt 中的依赖"""
+    req_file = "requirements.txt"
+    if os.path.exists(req_file):
+        print(f"📦 检测到依赖文件 {req_file}...")
+        try:
+            print("⏳ 正在检查/安装第三方库，请稍候...")
+            # 使用 pip 安装依赖
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", req_file])
+            print("✅ 依赖安装/检查完成。")
+        except subprocess.CalledProcessError:
+            print("⚠️ 警告：依赖安装失败，请检查网络或手动安装。")
+    else:
+        print("ℹ️ 未找到 requirements.txt，跳过依赖安装。")
+
+
+def find_icon():
+    """在根目录下寻找 .ico 文件"""
+    ico_files = glob.glob("*.ico")
+    if ico_files:
+        # 找到第一个图标就使用
+        print(f"🎨 自动发现图标文件: {ico_files[0]}")
+        return ico_files[0]
+    else:
+        print("⚠️ 未找到 .ico 图标文件，将使用默认图标。")
+        return None
+
+
+def get_app_name():
+    """确定软件名称"""
+    if APP_NAME_OVERRIDE:
+        return APP_NAME_OVERRIDE
+    # 获取当前文件夹名称作为软件名
+    current_folder_name = os.path.basename(os.getcwd())
+    return current_folder_name if current_folder_name else "MyApplication"
+
 
 def build_exe():
-    print(f"🚀 启动打包工具 [目录: {BASE_DIR}]")
-    os.chdir(BASE_DIR)
+    print("=" * 50)
+    print("🚀 启动通用自动打包程序")
+    print("=" * 50)
 
-    # 0. 清理旧的构建文件 (带重试机制)
-    for folder in ['build', 'dist']:
-        if os.path.exists(folder):
-            print(f"🧹 正在清理 {folder} 文件夹...")
-            while True:
-                try:
-                    shutil.rmtree(folder)
-                    break  # 成功删除，跳出循环
-                except PermissionError:
-                    print(f"\n⚠️ 无法删除 {folder}，因为它可能正在被占用。")
-                    print("👉 请检查是否还没关闭之前的程序？(Ref-Brusher.exe)")
-                    user_input = input("❌ 请关闭程序后按回车键重试 (输入 n 退出): ")
-                    if user_input.lower() == 'n':
-                        print("🚫 打包已取消。")
-                        return
-                except Exception as e:
-                    print(f"❌ 清理出错: {e}")
-                    return
+    # 1. 检查入口文件
+    if not os.path.exists(MAIN_FILE):
+        print(f"❌ 严重错误：找不到入口文件 {MAIN_FILE}！")
+        print("   请确保此脚本和 main.py 在同一个文件夹下。")
+        input("按回车键退出...")
+        return
 
-    # 1. 确保环境里有 PySide6 和 PyInstaller
-    print("📦 检查并安装必要环境...")
+    # 2. 安装依赖
+    install_requirements()
+
+    # 3. 确认 PyInstaller 是否存在
     try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "PySide6", "pyinstaller"])
-    except subprocess.CalledProcessError:
-        print("⚠️ 安装库时出现警告，尝试继续...")
+        import PyInstaller
+    except ImportError:
+        print("⚠️ 未检测到 PyInstaller，正在安装打包工具...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
 
-    # 2. 自动识别图标
-    icon_file = None
-    for f in os.listdir(BASE_DIR):
-        if f.lower().endswith(".ico"):
-            icon_file = f
-            print(f"🎨 找到图标: {icon_file}")
-            break
+    # 4. 收集资源文件
+    add_data_args = []
 
-    # 3. 选择模式
-    print("\n1. 单文件模式 (Onefile) - 只有一个exe，清爽但启动稍慢")
-    print("2. 文件夹模式 (Onedir)  - 一个文件夹，启动快但在文件夹里找exe")
-    user_choice = input("请输入选项 [默认 1]: ").strip()
-    mode_arg = "--onedir" if user_choice == "2" else "--onefile"
+    # 检测背景图
+    if os.path.exists(BG_IMAGE_NAME):
+        print(f"🖼️ 发现背景图: {BG_IMAGE_NAME}，正在加入打包列表...")
+        # Windows下资源分隔符是 ;  格式: 源文件;目标路径(.表示根目录)
+        add_data_args.append(f'--add-data "{BG_IMAGE_NAME};."')
+    else:
+        print(f"⚠️ 提示：未找到 {BG_IMAGE_NAME}，打包后的程序将不包含此背景。")
 
-    # 4. 构建命令
-    cmd = [
-        sys.executable, "-m", "PyInstaller",
+    # 检测 assets 文件夹 (如果有的话，也顺便带上，增强通用性)
+    if os.path.exists("assets"):
+        print("📂 发现 assets 文件夹，正在加入打包列表...")
+        add_data_args.append(f'--add-data "assets;assets"')
+
+    # 5. 获取图标
+    icon_path = find_icon()
+    icon_cmd = f'--icon="{icon_path}" ' if icon_path else ""
+
+    # 6. 获取软件名
+    app_name = get_app_name()
+    print(f"🏷️ 软件生成名称: {app_name}.exe")
+
+    # 7. 选择模式
+    print("\n请选择打包模式：")
+    print("1. 单文件模式 (Onefile) - 推荐，生成一个独立的 exe")
+    print("2. 文件夹模式 (Onedir)  - 生成一个文件夹，启动快但文件多")
+    choice = input("请输入选项 (1/2) [默认为1]: ").strip()
+
+    mode_arg = "--onefile"
+    if choice == "2":
+        mode_arg = "--onedir"
+
+    # 8. 组装命令
+    # 基础命令：去黑框(--noconsole)，清理缓存(--clean)，窗口模式(--windowed)
+    cmd_parts = [
+        "pyinstaller",
         "--noconsole",
         "--clean",
+        "--windowed",
+        f'--name="{app_name}"',
         mode_arg,
-        f'--name={APP_NAME}',
-        # 强制包含关键子模块，防止自动识别失败
-        "--hidden-import=PySide6.QtWidgets",
-        "--hidden-import=PySide6.QtGui",
-        "--hidden-import=PySide6.QtCore"
+        icon_cmd
     ]
 
-    if icon_file:
-        cmd.append(f'--icon={icon_file}')
+    # 添加资源数据
+    cmd_parts.extend(add_data_args)
 
-    # 添加背景图等静态文件
-    for f in EXTRA_FILES:
-        if os.path.exists(f):
-            # Windows 分号分隔格式：源文件;目标位置(.)
-            cmd.append(f'--add-data={f};.')
-            print(f"🖼️ 已关联资源: {f}")
+    # 添加隐藏导入
+    for hidden in HIDDEN_IMPORTS:
+        cmd_parts.append(f'--hidden-import "{hidden}"')
 
-    # 如果有 views 或 services 文件夹，PyInstaller 通常能自动识别，
-    # 但如果是单纯的资源文件夹 assets，需要手动添加：
-    if os.path.exists("assets"):
-        cmd.append('--add-data=assets;assets')
+    # 添加入口文件
+    cmd_parts.append(MAIN_FILE)
 
-    cmd.append(MAIN_FILE)
+    # 合并为字符串
+    full_command = " ".join(cmd_parts)
 
-    print(f"\n🛠️ 正在执行打包，请稍候...")
-    try:
-        subprocess.check_call(cmd)
-        print(f"\n✅ 打包完成！exe 文件在 dist 文件夹中。")
-        os.startfile("dist")
-    except Exception as e:
-        print(f"❌ 打包失败: {e}")
+    print("\n" + "-" * 50)
+    print(f"🛠️ 正在执行: {full_command}")
+    print("☕ 打包中，请耐心等待...")
+    print("-" * 50)
+
+    # 9. 执行打包
+    os.system(full_command)
+
+    # 10. 结果与重要提示
+    print("\n" + "=" * 50)
+    if os.path.exists(os.path.join("dist", f"{app_name}.exe")) or os.path.exists(os.path.join("dist", app_name)):
+        print("✅ 打包成功！")
+        print(f"📂 请在 dist 文件夹中查看结果。")
+
+        # ⚠️⚠️⚠️ 关键提示：关于图片路径 ⚠️⚠️⚠️
+        print("\n⚠️【重要提示】关于代码中如何读取 background.jpg：")
+        print("打包后，图片会被解压到临时目录。请在你的 main.py 中使用以下函数获取路径，")
+        print("否则程序运行后可能找不到图片：")
+        print("-" * 20)
+        print("import sys, os")
+        print("def get_resource_path(relative_path):")
+        print("    if hasattr(sys, '_MEIPASS'):")
+        print("        return os.path.join(sys._MEIPASS, relative_path)")
+        print("    return os.path.join(os.path.abspath('.'), relative_path)")
+        print("-" * 20)
+        print(f"使用示例: bg_path = get_resource_path('{BG_IMAGE_NAME}')")
+    else:
+        print("❌ 打包可能失败，请检查上方的错误信息。")
+    print("=" * 50)
+    input("按回车键结束...")
+
 
 if __name__ == "__main__":
     build_exe()
@@ -272,20 +351,6 @@ SEARCH_PRIORITY = [
 
 # === 5. 格式化标准 ===
 DEFAULT_STYLE = "gbt7714-2015"
-```
-
----
-
-### 📄 `desktop.ini`
-
-```ini:desktop.ini
-[.ShellClassInfo]
-IconResource=C:\Users\hansh\PycharmProjects\Github\Ref-Brusher\Brush.ico,0
-[ViewState]
-Mode=
-Vid=
-FolderType=Generic
-
 ```
 
 ---
@@ -976,6 +1041,7 @@ class CitationData:
 3. 支持 van, von 等复姓识别
 4. 【精准版】支持中国学者拼音双名自动拆分 (Han Shaoheng -> HAN S H)
    - 引入拼音字典校验，防止误伤外国名字 (如 Simona 不会被拆)
+   - 【V3.3 修复】防止单字被误拆 (Hao -> Ha o, Gang -> Ga ng)
 =========================================================
 """
 
@@ -1097,6 +1163,12 @@ def try_split_pinyin(given_name: str) -> str:
     # 拼音音节最短2字母(除了a,o,e)，最长6字母(zhuang)。
     # 双名总长度至少4 (如 bo yi)，通常不超过12。
     if length < 3 or length > 12:
+        return given_name
+
+    # 【核心修复 V3.3】
+    # 0. 优先判断：如果整个名字本身就是一个合法拼音，那就绝不要拆！
+    # 这能防止 "Hao" 被拆成 "Ha o"，"Gang" 被拆成 "Ga ng"
+    if given_name.lower() in VALID_PINYINS:
         return given_name
 
     # 尝试从第2个字符到倒数第2个字符进行切分
@@ -1253,8 +1325,11 @@ if __name__ == "__main__":
         ("Chen Guangkun", "CHEN G K", "双名连写 - Guang kun"),
 
         # --- 组2: 中国单名 (不应拆) ---
-        ("Wang Jing", "WANG J", "单名 - 不应拆分"),
-        ("Li Wei", "LI W", "单名 - 不应拆分"),
+        ("Meng Hao", "MENG H", "单名 - Hao (不应拆为 H O)"),
+        ("Liu Gang", "LIU G", "单名 - Gang (不应拆为 G ng)"),
+        ("Wang Jing", "WANG J", "单名 - Jing"),
+        ("Li Wei", "LI W", "单名 - Wei"),
+        ("Xu Xian", "XU X", "单名 - Xian"),
 
         # --- 组3: 外国名 (不应误拆) ---
         ("Lee Simona", "LEE S", "外国名 Simona - 不应拆为 S M"),
@@ -1270,7 +1345,6 @@ if __name__ == "__main__":
 
         # --- 组5: 复杂拼音边界 ---
         ("Lin Yingying", "LIN Y Y", "Ying ying"),
-        ("Xu Xian", "XU X", "Xian 是单字 - 不应拆为 Xi an"),
         ("Fan Bingbing", "FAN B B", "Bing bing"),
         ("Ma Yo-Yo", "MA Y Y", "Yo-Yo 连字符")
     ]
@@ -1323,12 +1397,16 @@ import os
 import time
 import re
 import difflib
-import html  # 【新增】用于转义 HTML 特殊字符
+import html
+import traceback  # 【新增】用于打印详细错误堆栈
 import config
 from services import formatter
 from services.api_engines.openalex_engine import OpenAlexEngine
 from services.api_engines.crossref import CrossrefEngine
 from services.api_engines.semantic_scholar import SemanticScholarEngine
+
+
+# 【回退】不再引入 CnkiEngine
 
 
 class Orchestrator:
@@ -1343,6 +1421,7 @@ class Orchestrator:
         if config.SourceConfig.OPENALEX_ENABLED: self.engines.append(OpenAlexEngine())
         if config.SourceConfig.CROSSREF_ENABLED: self.engines.append(CrossrefEngine())
         if config.SourceConfig.S2_ENABLED: self.engines.append(SemanticScholarEngine())
+        # 【回退】删除了中文引擎加载逻辑
         print(f"--- [调试] 引擎初始化完毕，共加载 {len(self.engines)} 个引擎")
 
     def format_batch(self, raw_text_block: str, callback_signal=None) -> dict:
@@ -1350,70 +1429,87 @@ class Orchestrator:
         lines = raw_text_block.split('\n')
         list_with_num = []
         list_no_num = []
-        list_html = []  # 【新增】用于存储 HTML 显示内容
+        list_html = []  # 用于存储 HTML 显示内容
 
         total = len(lines)
 
         for i, line in enumerate(lines):
-            original_line = line.strip()
-            if not original_line:
-                continue
+            try:
+                # === 核心处理逻辑包裹在 try 块中，防止单条报错导致程序闪退 ===
+                original_line = line.strip()
+                if not original_line:
+                    continue
 
-            print(f"--- [调试] 处理第 {i + 1} 条 ---")
+                print(f"--- [调试] 处理第 {i + 1} 条 ---")
 
-            # 分离序号
-            match = re.match(r'^\s*(\[\d+\]|\d+\.|\d+、|\(\d+\))\s*(.*)', original_line)
-            prefix = ""
-            clean_query = original_line
-            if match:
-                prefix = match.group(1)
-                clean_query = match.group(2)
+                # 分离序号
+                match = re.match(r'^\s*(\[\d+\]|\d+\.|\d+、|\(\d+\))\s*(.*)', original_line)
+                prefix = ""
+                clean_query = original_line
+                if match:
+                    prefix = match.group(1)
+                    clean_query = match.group(2)
 
-            # 处理单条 (现在返回 3 个值: 文本, 是否成功, URL)
-            formatted_content, is_success, url = self._format_single_with_status(clean_query)
+                # 处理单条 (现在返回 3 个值: 文本, 是否成功, URL)
+                formatted_content, is_success, url = self._format_single_with_status(clean_query)
 
-            # 通过 callback 发送状态: "PREV_OK" 或 "PREV_FAIL"
-            if callback_signal:
-                progress = int(((i + 1) / total) * 100)
-                status_tag = "PREV_OK" if is_success else "PREV_FAIL"
-                next_msg = f"正在处理: {clean_query[:15]}..."
-                callback_signal(progress, f"{status_tag}|{next_msg}")
+                # 通过 callback 发送状态: "PREV_OK" 或 "PREV_FAIL"
+                if callback_signal:
+                    progress = int(((i + 1) / total) * 100)
+                    status_tag = "PREV_OK" if is_success else "PREV_FAIL"
+                    next_msg = f"正在处理: {clean_query[:15]}..."
 
-            # 1. 构建纯文本结果 (用于复制)
-            list_no_num.append(formatted_content)
-            full_text_line = f"{prefix} {formatted_content}" if prefix else formatted_content
-            list_with_num.append(full_text_line)
+                    # 【核心修复】智能兼容 Qt 信号和普通函数
+                    # 防止因为直接调用 Signal 对象导致 TypeError 从而引发 0xC0000409 崩溃
+                    if hasattr(callback_signal, 'emit'):
+                        # 如果是 Qt 信号，必须用 .emit()
+                        callback_signal.emit(progress, f"{status_tag}|{next_msg}")
+                    else:
+                        # 如果是普通函数，直接调用
+                        callback_signal(progress, f"{status_tag}|{next_msg}")
 
-            # 2. 构建 HTML 结果 (用于显示和点击)
-            # 使用 html.escape 防止标题中的 < > 等字符破坏 HTML 结构
-            safe_text = html.escape(full_text_line)
+                # 1. 构建纯文本结果 (用于复制)
+                list_no_num.append(formatted_content)
+                full_text_line = f"{prefix} {formatted_content}" if prefix else formatted_content
+                list_with_num.append(full_text_line)
 
-            if is_success and url:
-                # 成功且有链接：包裹 <a> 标签，并加一个小的链接图标提示
-                # 样式说明：text-decoration:none 去掉下划线，颜色交给 CSS 控制
-                html_line = (
-                    f'<div style="margin-bottom: 12px;">'
-                    f'<a href="{url}" title="点击跳转原文: {url}">'
-                    f'{safe_text} <span style="font-size:12px; vertical-align:middle;">🔗</span>'
-                    f'</a>'
-                    f'</div>'
-                )
-            elif is_success:
-                # 成功但无链接
-                html_line = f'<div style="margin-bottom: 12px; color:#2c3e50;">{safe_text}</div>'
-            else:
-                # 失败：用灰色或红色显示，不加链接
-                html_line = f'<div style="margin-bottom: 12px; color:#7f8c8d;">{safe_text}</div>'
+                # 2. 构建 HTML 结果 (用于显示和点击)
+                safe_text = html.escape(full_text_line)
 
-            list_html.append(html_line)
+                if is_success and url:
+                    # 成功且有链接：直接在 style 属性里写死颜色为灰色 (#606266)，去掉下划线
+                    html_line = (
+                        f'<div style="margin-bottom: 12px;">'
+                        f'<a href="{url}" style="color: #606266; text-decoration: none; font-weight: normal;" title="点击跳转原文: {url}">'
+                        f'{safe_text}'
+                        f'</a>'
+                        f'</div>'
+                    )
+                elif is_success:
+                    # 成功但无链接
+                    html_line = f'<div style="margin-bottom: 12px; color:#2c3e50;">{safe_text}</div>'
+                else:
+                    # 失败：用浅灰色显示，不加链接
+                    html_line = f'<div style="margin-bottom: 12px; color:#95a5a6;">{safe_text}</div>'
 
-            if i < total - 1:
-                time.sleep(config.MIN_REQUEST_INTERVAL)
+                list_html.append(html_line)
+
+                if i < total - 1:
+                    time.sleep(config.MIN_REQUEST_INTERVAL)
+
+            except Exception as e:
+                # 【防崩兜底】万一某一行处理出错，打印错误，但不要让程序死掉
+                print(f"❌ 第 {i + 1} 行处理发生严重错误: {e}")
+                traceback.print_exc()  # 打印详细堆栈以便调试
+                # 依然添加一条错误记录，保证结果对齐
+                list_no_num.append(f"{line} (处理出错)")
+                list_with_num.append(f"{line} (处理出错)")
+                list_html.append(f'<div style="color:red;">处理出错: {html.escape(line)}</div>')
 
         return {
             "with_num": "\n\n".join(list_with_num),
             "no_num": "\n\n".join(list_no_num),
-            "display_html": "".join(list_html)  # HTML 不需要换行符，div 自带换行
+            "display_html": "".join(list_html)
         }
 
     def _format_single_with_status(self, query: str) -> (str, bool, str):
@@ -1429,17 +1525,21 @@ class Orchestrator:
         is_pure_doi = "10." in query and "/" in query and len(query.split()) < 2
         if is_pure_doi: query = query.strip()
 
+        # 【回退】移除了针对中文的引擎重排序逻辑，直接遍历英文引擎
         for engine in self.engines:
             try:
                 citation_data = engine.search(query)
                 if citation_data:
+                    # 调用验证逻辑 (V3.1版本)
                     is_match, reason = self._validate_result(query, citation_data)
                     if is_match:
                         # 成功！返回 URL
                         return formatter.to_gbt7714(citation_data), True, citation_data.url
                     else:
+                        print(f"   [校验失败] {engine.name} 结果被拦截: {reason}")
                         continue
-            except Exception:
+            except Exception as e:
+                print(f"   [引擎错误] {engine.name}: {e}")
                 continue
 
         # 失败
@@ -1451,27 +1551,87 @@ class Orchestrator:
         return res
 
     def _validate_result(self, user_query: str, data) -> (bool, str):
+        """
+        【保留 V3.1 核心修复】
+        保留了短姓氏支持、标题确信豁免等英文优化逻辑。
+        移除了中文特权通道。
+        """
         if not data.title: return False, "无标题"
+
+        # 【回退】移除了中文/本地解析的特权通道
+
         query_lower = user_query.lower()
         title_lower = data.title.lower()
-        if data.doi and data.doi.lower() in query_lower: return True, "DOI匹配"
-        similarity = difflib.SequenceMatcher(None, query_lower, title_lower).ratio()
-        if similarity > 0.7: return True, "相似度达标"
-        query_words = [w for w in re.split(r'\W+', query_lower) if len(w) > 3]
-        if not query_words: return True, "输入过短"
-        hit_count = sum(1 for w in query_words if w in title_lower)
-        if hit_count / len(query_words) > 0.7: return True, "关键词覆盖"
-        has_author = False
+
+        # 0. DOI 绝对信任
+        if data.doi and len(data.doi) > 5 and data.doi.lower() in query_lower:
+            return True, "DOI精确匹配"
+
+        # 预处理：分词
+        def get_tokens(text):
+            # 增加对 None 的保护
+            if not text: return []
+            clean = re.sub(r'[^\w\s]', ' ', text)
+            return [w for w in clean.split() if len(w) > 2]
+
+        query_tokens = get_tokens(query_lower)
+        title_tokens = get_tokens(title_lower)
+
+        if not title_tokens: return False, "API标题无效"
+
+        # 1. 标题词覆盖率
+        match_count = sum(1 for w in title_tokens if w in query_tokens)
+        coverage = match_count / len(title_tokens)
+
+        # 标题确信豁免 (V3.1 保留)
+        if coverage > 0.8:
+            return True, f"标题高度吻合({coverage:.1%})"
+
+        if coverage < 0.4:
+            return False, f"标题差异过大({coverage:.1%})"
+
+        # 2. 连词检测 (V3.1 保留)
+        has_bigram = False
+        if len(title_tokens) >= 2:
+            for i in range(len(title_tokens) - 1):
+                bigram = f"{title_tokens[i]} {title_tokens[i + 1]}"
+                if bigram in query_lower:
+                    has_bigram = True
+                    break
+        else:
+            if title_tokens[0] in query_lower: has_bigram = True
+
+        if not has_bigram and coverage < 0.8:
+            return False, "无连续词重叠"
+
+        # 3. 作者校验 (V3.1 保留)
+        looks_like_has_author = "et al" in query_lower or "," in query_lower
+        year_match = data.year and (str(data.year) in query_lower)
+
+        author_match = False
         if data.authors:
             for auth in data.authors:
-                for p in auth.lower().split():
-                    if len(p) > 2 and p in query_lower:
-                        has_author = True
+                if not auth: continue  # 保护空作者
+                raw_auth_clean = re.sub(r'[^\w\s]', ' ', auth.lower())
+                raw_parts = raw_auth_clean.split()
+                for part in raw_parts:
+                    # 放宽长度限制到 >= 2 (保留对 Li, Wu, Yao 的支持)
+                    if len(part) >= 2 and part in query_lower:
+                        author_match = True
                         break
-        has_year = data.year and (str(data.year) in query_lower)
-        if has_author and has_year: return True, "作者年份匹配"
-        if query_lower in title_lower or title_lower in query_lower: return True, "包含关系"
-        return False, f"相似度低({similarity:.2f})"
+                if author_match: break
+
+        if looks_like_has_author:
+            if not author_match:
+                return False, "作者不匹配"
+            if not year_match:
+                if coverage < 0.9:
+                    return False, "年份不匹配"
+        else:
+            if not year_match and coverage < 0.8:
+                return False, "年份不匹配且标题存疑"
+
+        return True, "验证通过"
 ```
 
 ---
@@ -3034,10 +3194,10 @@ def create_datetime_edit(init_dt=None, display_format="yyyy-MM-dd HH:mm"):
 ```python:views\main_view.py
 # views/main_view.py
 # ==============================================================================
-# 模块名称: 主界面视图 (View) - 修复版
+# 模块名称: 主界面视图 (View) - 布局修复版
 # 修复内容:
-#   1. 将输出框改为 QTextBrowser 以支持 setOpenExternalLinks
-#   2. 更新 CSS 样式以兼容 QTextBrowser
+#   1. 【重要】找回了消失的右侧标题和按钮（之前漏写了 addWidget）。
+#   2. 保持了“✅ 国标输出...”的新文案和灰色链接样式。
 # ==============================================================================
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QTextBrowser,
@@ -3159,7 +3319,8 @@ class MainView(BaseMainWindow):
         right_header_layout = QHBoxLayout()
         right_header_layout.setContentsMargins(0, 0, 0, 0)
 
-        lb_output = QLabel("✅ 国标结果 (点击跳转):")
+        # 标题控件
+        lb_output = QLabel("✅ 国标输出（点击即可前往原文）")
         lb_output.setStyleSheet(
             "font-weight: bold; color: #27ae60; font-size: 13px; border: none; background: transparent;")
 
@@ -3179,19 +3340,24 @@ class MainView(BaseMainWindow):
         self.btn_copy_with_num.setEnabled(False)
         self.btn_copy_no_num.setEnabled(False)
 
+        # 【核心修复】将这些控件真正添加到布局中
         right_header_layout.addWidget(lb_output)
         right_header_layout.addStretch()
         right_header_layout.addWidget(self.btn_copy_with_num)
         right_header_layout.addWidget(self.btn_copy_no_num)
 
-        # 【核心修改】这里改为 QTextBrowser，它才支持 setOpenExternalLinks
+        # 输出框
         self.output_edit = QTextBrowser()
         self.output_edit.setPlaceholderText("干净规整的参考文献即将出现...")
 
         # 允许打开外部链接
         self.output_edit.setOpenExternalLinks(True)
-        # QTextBrowser 默认就是只读的，但写上也无妨
         self.output_edit.setReadOnly(True)
+
+        # 使用 setDefaultStyleSheet 设置默认链接样式
+        self.output_edit.document().setDefaultStyleSheet(
+            "a { color: #606266; text-decoration: none; font-weight: normal; }"
+        )
 
         # 调用支持透明样式的函数
         self.output_edit.setStyleSheet(self._get_editor_style(True))
@@ -3231,10 +3397,6 @@ class MainView(BaseMainWindow):
     def _get_editor_style(self, is_read_only=False):
         """
         获取编辑器样式。
-        【关键修改】:
-        1. 使用 rgba 背景色以透出大卡片的模糊背景。
-        2. 新增 'a' 标签样式：默认深灰色，悬停时变成蓝色下划线。
-        3. 增加对 QTextBrowser 的支持。
         """
         if is_read_only:
             # 只读模式（右侧）：稍微灰一点
@@ -3247,7 +3409,6 @@ class MainView(BaseMainWindow):
         border_focus = "#2ecc71" if is_read_only else "#3498db"
         bg_focus = "rgba(255, 255, 255, 0.9)"
 
-        # 下面这行同时作用于 QTextEdit (输入框) 和 QTextBrowser (输出框)
         return f"""
             QTextEdit, QTextBrowser {{
                 background-color: {bg_color}; 
@@ -3261,17 +3422,6 @@ class MainView(BaseMainWindow):
             QTextEdit:focus, QTextBrowser:focus {{ 
                 border: 1px solid {border_focus}; 
                 background-color: {bg_focus}; 
-            }}
-            /* 【链接样式美化】 */
-            a {{
-                color: #2c3e50;         /* 默认链接颜色：深灰 (看起来像普通文字) */
-                text-decoration: none;  /* 去掉下划线 */
-                font-weight: normal;
-            }}
-            a:hover {{
-                color: #3498db;         /* 悬停时：变蓝 */
-                text-decoration: underline; /* 悬停时：加下划线 */
-                cursor: pointer;
             }}
         """
 
