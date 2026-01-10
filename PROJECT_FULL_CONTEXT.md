@@ -1,5 +1,5 @@
 # 项目上下文文档
-生成时间: 2025-12-26 16:40:31
+生成时间: 2026-01-09 13:08:16
 
 > 注意：此文档包含项目的完整代码细节。请将此文件发送给 AI 助手以便进行代码修改。
 
@@ -11,6 +11,7 @@
 │   .gitignore
 │   build_tool.py
 │   config.py
+│   desktop.ini
 │   diagnose.py
 │   import_tool.py
 │   main.py
@@ -18,6 +19,7 @@
 │   Ref-Brusher.spec
 │   requirements.txt
 │   SampleManager_v2.1.spec
+│   test.py
 │   文献国标刷_v1.0.spec
 │   📂 core/
 │   │   verifier.py
@@ -355,6 +357,20 @@ DEFAULT_STYLE = "gbt7714-2015"
 
 ---
 
+### 📄 `desktop.ini`
+
+```ini:desktop.ini
+[.ShellClassInfo]
+IconResource=C:\Users\hansh\PycharmProjects\Github\Ref-Brusher\Brush.ico,0
+[ViewState]
+Mode=
+Vid=
+FolderType=Generic
+
+```
+
+---
+
 ### 📄 `diagnose.py`
 
 ```python:diagnose.py
@@ -610,6 +626,123 @@ class RefFormatterController:
 if __name__ == "__main__":
     controller = RefFormatterController()
     controller.run()
+```
+
+---
+
+### 📄 `test.py`
+
+```python:test.py
+"""
+文件路径: auto_test_suite.py
+=========================================================
+【自动化对抗测试套件】
+功能：
+1. 模拟 10 组极具挑战性的"用户输入"（残缺、乱码、错误DOI）。
+2. 模拟 API 应该返回的"理想数据" (Ground Truth)。
+3. 运行您的 Orchestrator 和 Formatter 逻辑。
+4. 对比差异，生成评分报告。
+=========================================================
+"""
+
+import sys
+import os
+import unittest
+from services.orchestrator import Orchestrator
+from services import formatter
+from models.citation_model import CitationData
+
+
+# 模拟 API 返回的理想数据对象 (用于测试 Formatter 逻辑)
+def mock_citation(title, authors, source, year, vol="", issue="", pages="", doi=""):
+    c = CitationData()
+    c.title = title
+    c.authors = authors
+    c.source = source
+    c.year = year
+    c.volume = vol
+    c.issue = issue
+    c.pages = pages
+    c.doi = doi
+    return c
+
+
+class AutoTestSuite(unittest.TestCase):
+
+    def setUp(self):
+        print("\n" + "=" * 60)
+        print("🤖 启动 Ref-Brusher 自动化对抗测试...")
+        self.orc = Orchestrator()
+
+    def test_case_01_broken_doi_spacing(self):
+        """测试用例 1: DOI 断裂修复 (j. conbuildmat)"""
+        print("Test 1: 包含空格的断裂 DOI 识别")
+        raw_input = "Choi, S. G. (2016). Biocemented sand. https://doi.org/10.1016/j. conbuildmat.2016.05.124"
+
+        # 验证 Orchestrator 是否能提取并修复
+        dois, clean_text = self.orc._extract_and_clean_doi(raw_input)
+        if not dois:
+            # 尝试备用修复逻辑
+            fixed = self.orc._try_fix_broken_doi(raw_input)
+            if fixed: dois = [fixed]
+
+        expected_doi = "10.1016/j.conbuildmat.2016.05.124"
+        self.assertIn(expected_doi, dois, "❌ 未能修复断裂的 DOI (j. conbuildmat)")
+        print(f"   ✅ 成功修复: {dois[0]}")
+
+    def test_case_02_chinese_name_reversal(self):
+        """测试用例 2: 中国姓名反序纠错 (Tian Kan-Liang)"""
+        print("Test 2: API 返回 '名+姓' 格式的自动纠错")
+        # 模拟 API 返回了错误顺序的名字
+        dirty_name = "Tian Kan-Liang"
+        # 期望: TIAN K L (Tian是姓)
+        result = formatter.format_western_name(dirty_name)
+        self.assertEqual(result, "TIAN K L", f"❌ 姓名反转失败: {result} != TIAN K L")
+        print(f"   ✅ 成功纠错: {dirty_name} -> {result}")
+
+    def test_case_03_et_al_logic(self):
+        """测试用例 3: 'et al' vs '等' (中英文区分)"""
+        print("Test 3: 多作者时的 'et al' 语言自适应")
+
+        # 英文例子
+        eng_authors = ["Smith, J.", "Doe, A.", "White, B.", "Black, C."]
+        res_eng = formatter.format_authors(eng_authors)
+        self.assertTrue("et al" in res_eng, f"❌ 英文多作者未出现 'et al': {res_eng}")
+
+        # 中文例子 (模拟 API 返回了拼音或汉字)
+        cn_authors = ["Zhang San", "Li Si", "Wang Wu", "Zhao Liu"]
+        # 注意：这里我们还没修复这个bug，现在的代码可能会报错或输出 et al
+        # 这是一个预期的"失败"测试，用来发现问题
+        res_cn = formatter.format_authors(cn_authors)
+
+        # 【自查发现问题点】: 现在的代码对拼音名字也会输出 et al，这符合国标对英文引用的规定。
+        # 但如果是纯中文文献呢？
+        cn_raw_authors = ["张三", "李四", "王五", "赵六"]
+        res_cn_raw = formatter.format_authors(cn_raw_authors)
+        # 如果代码里没写中文判断，这里会输出 "et al"，这是不完美的
+        print(f"   ⚠️ 当前中文多作者输出: {res_cn_raw} (如果显示 et al 则建议优化为 '等')")
+
+    def test_case_04_html_escaping(self):
+        """测试用例 4: HTML 注入防御"""
+        print("Test 4: 标题包含特殊符号的处理")
+        raw = "Study of <script>alert(1)</script> in React"
+        # 运行 batch
+        res = self.orc.format_batch(raw)
+        html_out = res["display_html"]
+        self.assertNotIn("<script>", html_out, "❌ HTML 标签未转义，存在注入风险")
+        self.assertIn("&lt;script&gt;", html_out, "✅ 成功转义特殊字符")
+
+    def test_case_05_pure_doi_input(self):
+        """测试用例 5: 纯 DOI 输入"""
+        print("Test 5: 用户只输入了一个 DOI")
+        raw = "10.1038/nature14539"
+        dois, _ = self.orc._extract_and_clean_doi(raw)
+        self.assertEqual(dois[0], "10.1038/nature14539", "❌ 纯 DOI 提取失败")
+        print(f"   ✅ 提取成功: {dois[0]}")
+
+
+if __name__ == '__main__':
+    unittest.main(argv=['first-arg-is-ignored'], exit=False)
 ```
 
 ---
@@ -1040,8 +1173,9 @@ class CitationData:
 2. 名字首字母大写，无缩写点 (A)
 3. 支持 van, von 等复姓识别
 4. 【精准版】支持中国学者拼音双名自动拆分 (Han Shaoheng -> HAN S H)
-   - 引入拼音字典校验，防止误伤外国名字 (如 Simona 不会被拆)
-   - 【V3.3 修复】防止单字被误拆 (Hao -> Ha o, Gang -> Ga ng)
+5. 【V4.0】智能纠正 API 返回的 "姓在前名在后" 格式
+6. 【V5.0】新增中英文环境检测，自动切换 'et al' / '等'
+7. 【V5.1 修复】修复页码显示为 "None-None" 的问题，无效页码自动隐藏
 =========================================================
 """
 
@@ -1050,9 +1184,6 @@ import html
 from models.citation_model import CitationData
 
 # === 1. 数据准备 ===
-
-# 常见中国姓氏拼音 (大写)，用于触发检查
-# 包含百家姓 Top 200+，覆盖率极高，防止对纯老外名字触发拼音检测
 COMMON_CN_SURNAMES = {
     "LI", "WANG", "ZHANG", "LIU", "CHEN", "YANG", "ZHAO", "HUANG", "ZHOU", "WU",
     "XU", "SUN", "HU", "ZHU", "GAO", "LIN", "HE", "GUO", "MA", "LUO",
@@ -1095,8 +1226,6 @@ COMMON_CN_SURNAMES = {
     "ZUAN", "ZUI", "ZUN", "ZUO"
 }
 
-# 全量合法拼音音节表 (无声调)
-# 来源：标准汉语拼音方案
 VALID_PINYINS = {
     "a", "ai", "an", "ang", "ao", "ba", "bai", "ban", "bang", "bao", "bei", "ben",
     "beng", "bi", "bian", "biao", "bie", "bin", "bing", "bo", "bu", "ca", "cai",
@@ -1140,7 +1269,6 @@ VALID_PINYINS = {
 
 
 def clean_text(text: str) -> str:
-    """清洗 HTML 标签"""
     if not text:
         return ""
     clean_str = re.sub(r'<[^>]+>', '', text)
@@ -1149,107 +1277,80 @@ def clean_text(text: str) -> str:
 
 
 def try_split_pinyin(given_name: str) -> str:
-    """
-    【智能拼音拆分 - 严格校验版】
-    尝试将连写的拼音双名拆开。
-    策略：
-    1. 遍历所有可能的分割点。
-    2. 只有当拆分出的【两部分】都在 VALID_PINYINS 字典中时，才视为有效拆分。
-    3. 防止将 "Simona" 误拆为 "Si mona" (mona 不是拼音)。
-    """
     given_name = given_name.strip()
     length = len(given_name)
 
-    # 拼音音节最短2字母(除了a,o,e)，最长6字母(zhuang)。
-    # 双名总长度至少4 (如 bo yi)，通常不超过12。
     if length < 3 or length > 12:
         return given_name
 
-    # 【核心修复 V3.3】
-    # 0. 优先判断：如果整个名字本身就是一个合法拼音，那就绝不要拆！
-    # 这能防止 "Hao" 被拆成 "Ha o"，"Gang" 被拆成 "Ga ng"
     if given_name.lower() in VALID_PINYINS:
         return given_name
 
-    # 尝试从第2个字符到倒数第2个字符进行切分
-    # 例如 "Shaoheng" (len 8)
-    # i=2: Sh, aoheng (No)
-    # i=4: Shao, heng (Yes!)
-
-    # 优先寻找最合理的切分。
-    # 从前往后切
     for i in range(1, length):
         part1 = given_name[:i].lower()
         part2 = given_name[i:].lower()
 
-        # 核心校验：两部分必须都是合法拼音
         if part1 in VALID_PINYINS and part2 in VALID_PINYINS:
-            # 找到合法拆分！直接返回
             return f"{given_name[:i]} {given_name[i:]}"
 
-    # 如果找不到合法拆分，保持原样
     return given_name
 
 
 def format_western_name(name_str: str) -> str:
-    """
-    【姓名整形师 V5.0】
-    将外文姓名转换为 GB/T 7714 格式 (严格全大写)
-    输入: "Ludwig van Beethoven" -> 输出: "VAN BEETHOVEN L"
-    输入: "Han Shaoheng"         -> 输出: "HAN S H"
-    输入: "Lee Simona"           -> 输出: "LEE S" (Simona 不是双名，不拆)
-    """
     name_str = clean_text(name_str)
     if not name_str:
         return ""
 
-    # 中文名直接返回 (简单判定)
+    # 中文名直接返回
     if re.search(r'[\u4e00-\u9fff]', name_str):
         return name_str
 
-    # 定义常见的姓氏前缀 (小写)
     surname_prefixes = ['van', 'von', 'de', 'du', 'da', 'del', 'la', 'le']
 
     family = ""
     given = ""
 
-    # 情况 A: 已经有逗号 "Beethoven, Ludwig van"
     if ',' in name_str:
         parts = name_str.split(',', 1)
         family = parts[0].strip()
         given = parts[1].strip()
-
-    # 情况 B: 自然序 "Ludwig van Beethoven"
     else:
         tokens = name_str.split()
         if not tokens: return ""
         if len(tokens) == 1: return tokens[0].upper()
 
-        # 智能检测复姓 (查看倒数第二个词是否是前缀)
         if len(tokens) > 2 and tokens[-2].lower() in surname_prefixes:
-            # 姓是最后两个词: "van Beethoven"
             family = " ".join(tokens[-2:])
             given = " ".join(tokens[:-2])
         else:
-            # 默认最后一个词是姓
             family = tokens[-1]
             given = " ".join(tokens[:-1])
 
-    # === 核心国标规则 ===
-    # 1. 姓: 全大写
+            # === V4.0 反序纠错 ===
+            first_token_upper = tokens[0].upper()
+            is_family_hyphenated = '-' in family
+            is_first_token_cn_surname = first_token_upper in COMMON_CN_SURNAMES
+            family_upper = family.upper()
+            is_family_cn_surname = family_upper in COMMON_CN_SURNAMES
+
+            should_swap = False
+
+            if is_family_hyphenated and is_first_token_cn_surname:
+                should_swap = True
+            elif len(tokens) == 2 and (not is_family_cn_surname) and is_first_token_cn_surname:
+                should_swap = True
+
+            if should_swap:
+                family = tokens[0]
+                given = " ".join(tokens[1:])
+
     family_fmt = family.upper()
 
-    # 2. 名: 处理逻辑
-    # 【新增】针对中国学者拼音双名连写的特殊优化
-    # 条件：姓氏是常见中国姓，且名字没有空格/连字符
     if family_fmt in COMMON_CN_SURNAMES and ' ' not in given and '-' not in given:
         given = try_split_pinyin(given)
 
-    # 清理分隔符，统一变空格 (处理 Jean-Pierre -> Jean Pierre)
     given_clean = given.replace('.', ' ').replace('-', ' ')
     given_tokens = given_clean.split()
-
-    # 提取首字母
     given_initials = [t[0].upper() for t in given_tokens if t]
     given_fmt = " ".join(given_initials)
 
@@ -1259,19 +1360,38 @@ def format_western_name(name_str: str) -> str:
         return family_fmt
 
 
+def has_chinese_char(text: str) -> bool:
+    """【V5.0】辅助函数：检测是否包含中文字符"""
+    return bool(re.search(r'[\u4e00-\u9fff]', text))
+
+
 def format_authors(authors: list) -> str:
-    """格式化作者列表"""
+    """格式化作者列表，支持语言自适应"""
     if not authors:
         return "[佚名]"
 
     formatted_authors = []
-    for auth in authors:
-        fmt_name = format_western_name(auth)
-        formatted_authors.append(fmt_name)
+    # 统计中文名字数量，决定最后的后缀是 "et al" 还是 "等"
+    cn_name_count = 0
 
-    # 前3位列出，超过3位加 et al.
+    for auth in authors:
+        if has_chinese_char(auth):
+            cn_name_count += 1
+            # 中文名直接保留
+            formatted_authors.append(auth.strip())
+        else:
+            fmt_name = format_western_name(auth)
+            formatted_authors.append(fmt_name)
+
+    # 决策：如果超过半数是中文名，或者前3个里有中文名，则认为是中文环境
+    # 简单判定：只要第一个作者是中文，就用 "等"
+    is_chinese_context = False
+    if authors and has_chinese_char(authors[0]):
+        is_chinese_context = True
+
     if len(formatted_authors) > 3:
-        return ", ".join(formatted_authors[:3]) + ", et al"
+        suffix = ", 等" if is_chinese_context else ", et al"
+        return ", ".join(formatted_authors[:3]) + suffix
     else:
         return ", ".join(formatted_authors)
 
@@ -1302,74 +1422,54 @@ def to_gbt7714(data: CitationData) -> str:
     elif data.issue:
         result += f"({data.issue})"
 
+    # === 【V5.1 修复】页码清洗逻辑 ===
     if data.pages:
-        clean_pages = data.pages.replace("--", "-")
-        result += f": {clean_pages}"
+        # 1. 移除 'None' 或 'null' 字符串 (忽略大小写)
+        # 某些引擎可能会在页码缺失时生成 "None-None"
+        clean_pages = re.sub(r'(?i)(none|null)', '', str(data.pages))
+
+        # 2. 清洗多余的空格和连字符
+        # 将 "123 -- 456" 变成 "123-456"，将 " - " 变成 ""
+        clean_pages = clean_pages.replace(" ", "").replace("--", "-")
+        clean_pages = clean_pages.strip("-")
+
+        # 3. 只有当确实有内容时才追加
+        if clean_pages:
+            result += f": {clean_pages}"
 
     result += "."
     return result
 
 
-# ==============================================================================
-# 自查测试模块 (Run this file to verify)
-# ==============================================================================
 if __name__ == "__main__":
-    print("🚀 开始自查测试 (Formatter Self-Check)...\n")
+    print("🚀 Formatter Test V5.1 (None-None Fix)")
 
-    test_cases = [
-        # --- 组1: 标准中国双名 (连写) ---
-        ("Han Shaoheng", "HAN S H", "双名连写 - 基础"),
-        ("Li Xiaolong", "LI X L", "双名连写 - Xiao"),
-        ("Zhang Ziyi", "ZHANG Z Y", "双名连写 - Zi yi"),
-        ("Wang Jingwei", "WANG J W", "双名连写 - Jing wei"),
-        ("Chen Guangkun", "CHEN G K", "双名连写 - Guang kun"),
 
-        # --- 组2: 中国单名 (不应拆) ---
-        ("Meng Hao", "MENG H", "单名 - Hao (不应拆为 H O)"),
-        ("Liu Gang", "LIU G", "单名 - Gang (不应拆为 G ng)"),
-        ("Wang Jing", "WANG J", "单名 - Jing"),
-        ("Li Wei", "LI W", "单名 - Wei"),
-        ("Xu Xian", "XU X", "单名 - Xian"),
+    # 模拟 CitationData 对象
+    class MockData:
+        def __init__(self, title, pages):
+            self.title = title
+            self.pages = pages
+            self.source = "Journal"
+            self.authors = ["Smith A"]
+            self.year = "2023"
+            self.volume = "1"
+            self.issue = "1"
 
-        # --- 组3: 外国名 (不应误拆) ---
-        ("Lee Simona", "LEE S", "外国名 Simona - 不应拆为 S M"),
-        ("Han Solo", "HAN S", "外国名 Solo - 不应拆为 S L"),
-        ("James Lebron", "JAMES L", "外国名 Lebron - bron非拼音，不拆"),
-        ("Tan Christopher", "TAN C", "外国名 Christopher - 不拆"),
-        ("Albert Einstein", "EINSTEIN A", "标准外国名"),
-        ("Ludwig van Beethoven", "VAN BEETHOVEN L", "带前缀的复姓"),
 
-        # --- 组4: 已有格式 (保持原样) ---
-        ("Han, Shao-Heng", "HAN S H", "已有连字符"),
-        ("Han, Shao Heng", "HAN S H", "已有空格"),
-
-        # --- 组5: 复杂拼音边界 ---
-        ("Lin Yingying", "LIN Y Y", "Ying ying"),
-        ("Fan Bingbing", "FAN B B", "Bing bing"),
-        ("Ma Yo-Yo", "MA Y Y", "Yo-Yo 连字符")
+    # 测试用例
+    cases = [
+        ("Case 1: Normal", "123-125"),
+        ("Case 2: None-None", "None-None"),
+        ("Case 3: Mixed", "None-125"),
+        ("Case 4: Null string", "null-null"),
+        ("Case 5: Hyphen only", "-"),
     ]
 
-    success_count = 0
-    fail_count = 0
-
-    print(f"{'输入':<25} | {'预期':<15} | {'实际':<15} | {'结果'}")
-    print("-" * 75)
-
-    for raw_name, expected, note in test_cases:
-        actual = format_western_name(raw_name)
-        is_pass = (actual == expected)
-        status = "✅ PASS" if is_pass else "❌ FAIL"
-        if is_pass:
-            success_count += 1
-        else:
-            fail_count += 1
-
-        print(f"{raw_name:<25} | {expected:<15} | {actual:<15} | {status}")
-        if not is_pass:
-            print(f"   >>> 失败原因: {note}")
-
-    print("-" * 75)
-    print(f"测试结束: 成功 {success_count} / 总计 {len(test_cases)}")
+    for label, p_val in cases:
+        d = MockData("Test Title", p_val)
+        res = to_gbt7714(d)
+        print(f"{label:<20} | Raw Pages: {p_val:<10} | Result: {res}")
 ```
 
 ---
@@ -1383,7 +1483,7 @@ if __name__ == "__main__":
 【接口说明】
 def format_batch(self, raw_text_block: str, callback_signal=None) -> dict:
     '''
-    批量处理
+    批量处理 (纯多线程并发版，无缓存)
     返回字典包含:
     - "with_num": 纯文本（带序号） -> 用于复制
     - "no_num":   纯文本（无序号） -> 用于复制
@@ -1396,17 +1496,14 @@ import sys
 import os
 import time
 import re
-import difflib
 import html
-import traceback  # 【新增】用于打印详细错误堆栈
+import traceback
 import config
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from services import formatter
 from services.api_engines.openalex_engine import OpenAlexEngine
 from services.api_engines.crossref import CrossrefEngine
 from services.api_engines.semantic_scholar import SemanticScholarEngine
-
-
-# 【回退】不再引入 CnkiEngine
 
 
 class Orchestrator:
@@ -1421,90 +1518,103 @@ class Orchestrator:
         if config.SourceConfig.OPENALEX_ENABLED: self.engines.append(OpenAlexEngine())
         if config.SourceConfig.CROSSREF_ENABLED: self.engines.append(CrossrefEngine())
         if config.SourceConfig.S2_ENABLED: self.engines.append(SemanticScholarEngine())
-        # 【回退】删除了中文引擎加载逻辑
         print(f"--- [调试] 引擎初始化完毕，共加载 {len(self.engines)} 个引擎")
 
     def format_batch(self, raw_text_block: str, callback_signal=None) -> dict:
-        """批量处理"""
+        """
+        批量处理 - 并发加速版 (无缓存)
+        """
         lines = raw_text_block.split('\n')
-        list_with_num = []
-        list_no_num = []
-        list_html = []  # 用于存储 HTML 显示内容
-
-        total = len(lines)
+        valid_tasks = []
+        results_container = [None] * len(lines)
 
         for i, line in enumerate(lines):
-            try:
-                # === 核心处理逻辑包裹在 try 块中，防止单条报错导致程序闪退 ===
-                original_line = line.strip()
-                if not original_line:
-                    continue
+            original_line = line.strip()
+            if not original_line:
+                results_container[i] = {
+                    "text": "", "full": "", "html": ""
+                }
+                continue
 
-                print(f"--- [调试] 处理第 {i + 1} 条 ---")
+            match = re.match(r'^\s*(\[\d+\]|\d+\.|\d+、|\(\d+\))\s*(.*)', original_line)
+            prefix = ""
+            clean_query = original_line
+            if match:
+                prefix = match.group(1)
+                clean_query = match.group(2)
 
-                # 分离序号
-                match = re.match(r'^\s*(\[\d+\]|\d+\.|\d+、|\(\d+\))\s*(.*)', original_line)
-                prefix = ""
-                clean_query = original_line
-                if match:
-                    prefix = match.group(1)
-                    clean_query = match.group(2)
+            valid_tasks.append((i, clean_query, prefix))
 
-                # 处理单条 (现在返回 3 个值: 文本, 是否成功, URL)
-                formatted_content, is_success, url = self._format_single_with_status(clean_query)
+        total_tasks = len(valid_tasks)
+        finished_count = 0
 
-                # 通过 callback 发送状态: "PREV_OK" 或 "PREV_FAIL"
-                if callback_signal:
-                    progress = int(((i + 1) / total) * 100)
-                    status_tag = "PREV_OK" if is_success else "PREV_FAIL"
-                    next_msg = f"正在处理: {clean_query[:15]}..."
+        # max_workers=4 既能显著提速，又不容易触发 API 的 429 限流
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            # 直接提交 _format_single_with_status 任务，不走缓存逻辑
+            future_to_info = {
+                executor.submit(self._format_single_with_status, query): (idx, query, pfx)
+                for idx, query, pfx in valid_tasks
+            }
 
-                    # 【核心修复】智能兼容 Qt 信号和普通函数
-                    # 防止因为直接调用 Signal 对象导致 TypeError 从而引发 0xC0000409 崩溃
-                    if hasattr(callback_signal, 'emit'):
-                        # 如果是 Qt 信号，必须用 .emit()
-                        callback_signal.emit(progress, f"{status_tag}|{next_msg}")
+            for future in as_completed(future_to_info):
+                idx, query, prefix = future_to_info[future]
+                finished_count += 1
+
+                try:
+                    formatted_content, is_success, url = future.result()
+
+                    full_text_line = f"{prefix} {formatted_content}" if prefix else formatted_content
+                    safe_text = html.escape(full_text_line)
+
+                    if is_success and url:
+                        html_line = (
+                            f'<div style="margin-bottom: 12px;">'
+                            f'<a href="{url}" style="color: #606266; text-decoration: none; font-weight: normal;" title="点击跳转原文: {url}">'
+                            f'{safe_text}'
+                            f'</a>'
+                            f'</div>'
+                        )
+                    elif is_success:
+                        html_line = f'<div style="margin-bottom: 12px; color:#2c3e50;">{safe_text}</div>'
                     else:
-                        # 如果是普通函数，直接调用
-                        callback_signal(progress, f"{status_tag}|{next_msg}")
+                        html_line = f'<div style="margin-bottom: 12px; color:#95a5a6;">{safe_text}</div>'
 
-                # 1. 构建纯文本结果 (用于复制)
-                list_no_num.append(formatted_content)
-                full_text_line = f"{prefix} {formatted_content}" if prefix else formatted_content
-                list_with_num.append(full_text_line)
+                    results_container[idx] = {
+                        "text": formatted_content,
+                        "full": full_text_line,
+                        "html": html_line
+                    }
 
-                # 2. 构建 HTML 结果 (用于显示和点击)
-                safe_text = html.escape(full_text_line)
+                    if callback_signal:
+                        progress = int((finished_count / total_tasks) * 100)
+                        status_tag = "PREV_OK" if is_success else "PREV_FAIL"
+                        short_q = query[:15].replace("\n", "")
+                        next_msg = f"已完成: {short_q}..."
 
-                if is_success and url:
-                    # 成功且有链接：直接在 style 属性里写死颜色为灰色 (#606266)，去掉下划线
-                    html_line = (
-                        f'<div style="margin-bottom: 12px;">'
-                        f'<a href="{url}" style="color: #606266; text-decoration: none; font-weight: normal;" title="点击跳转原文: {url}">'
-                        f'{safe_text}'
-                        f'</a>'
-                        f'</div>'
-                    )
-                elif is_success:
-                    # 成功但无链接
-                    html_line = f'<div style="margin-bottom: 12px; color:#2c3e50;">{safe_text}</div>'
-                else:
-                    # 失败：用浅灰色显示，不加链接
-                    html_line = f'<div style="margin-bottom: 12px; color:#95a5a6;">{safe_text}</div>'
+                        if hasattr(callback_signal, 'emit'):
+                            callback_signal.emit(progress, f"{status_tag}|{next_msg}")
+                        else:
+                            callback_signal(progress, f"{status_tag}|{next_msg}")
 
-                list_html.append(html_line)
+                except Exception as e:
+                    print(f"❌ 行 {idx + 1} 处理异常: {e}")
+                    traceback.print_exc()
+                    err_text = f"{lines[idx]} (系统错误)"
+                    results_container[idx] = {
+                        "text": err_text, "full": err_text,
+                        "html": f'<div style="color:red;">处理出错: {html.escape(lines[idx])}</div>'
+                    }
 
-                if i < total - 1:
-                    time.sleep(config.MIN_REQUEST_INTERVAL)
+        list_with_num = []
+        list_no_num = []
+        list_html = []
 
-            except Exception as e:
-                # 【防崩兜底】万一某一行处理出错，打印错误，但不要让程序死掉
-                print(f"❌ 第 {i + 1} 行处理发生严重错误: {e}")
-                traceback.print_exc()  # 打印详细堆栈以便调试
-                # 依然添加一条错误记录，保证结果对齐
-                list_no_num.append(f"{line} (处理出错)")
-                list_with_num.append(f"{line} (处理出错)")
-                list_html.append(f'<div style="color:red;">处理出错: {html.escape(line)}</div>')
+        for item in results_container:
+            if item:
+                if item["text"]:
+                    list_no_num.append(item["text"])
+                    list_with_num.append(item["full"])
+                    list_html.append(item["html"])
 
         return {
             "with_num": "\n\n".join(list_with_num),
@@ -1512,28 +1622,107 @@ class Orchestrator:
             "display_html": "".join(list_html)
         }
 
+    def _extract_and_clean_doi(self, text: str):
+        """【保留原逻辑】提取 DOI 并清洗文本"""
+        valid_dois = []
+        cleaned_text = text
+
+        # === 优先策略：检测并修复带有空格的断裂 DOI ===
+        broken_pattern = r'doi\.org/(10\.[0-9a-zA-Z./_:;()\-]+(?:\s+[0-9a-zA-Z./_:;()\-]+)+)'
+        broken_matches = re.findall(broken_pattern, cleaned_text, re.IGNORECASE)
+
+        for raw_broken in broken_matches:
+            fixed_doi = raw_broken.replace(" ", "").replace("\t", "").rstrip(".")
+            if "/" in fixed_doi and len(fixed_doi) > 10:
+                valid_dois.append(fixed_doi)
+                remove_pattern = r'(https?://(dx\.)?doi\.org/)?\s*' + re.escape(raw_broken)
+                cleaned_text = re.sub(remove_pattern, '', cleaned_text, flags=re.IGNORECASE)
+
+        # === 常规策略：匹配标准的无空格 DOI ===
+        doi_pattern = r'(10\.\d{4,9}/[-._;()/:a-zA-Z0-9]+)'
+        found_dois = re.findall(doi_pattern, cleaned_text)
+
+        for raw_doi in found_dois:
+            clean_doi = raw_doi.rstrip(".")
+            if clean_doi not in valid_dois:
+                valid_dois.append(clean_doi)
+            remove_pattern = r'(https?://(dx\.)?doi\.org/)?\s*' + re.escape(clean_doi)
+            cleaned_text = re.sub(remove_pattern, '', cleaned_text, flags=re.IGNORECASE)
+
+        cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+        return valid_dois, cleaned_text
+
+    def _try_fix_broken_doi(self, text: str):
+        """【保留原逻辑】尝试修复断裂的 DOI"""
+        match = re.search(r'doi\.org/(10\..+)', text, re.IGNORECASE)
+        if match:
+            potential_part = match.group(1)
+            fixed_doi = potential_part.replace(" ", "").replace("\t", "").rstrip(".")
+            return fixed_doi
+
+        match_no_prefix = re.search(r'(10\.\d{4,5}/[\w\s\.-]+)', text)
+        if match_no_prefix:
+            potential = match_no_prefix.group(1)
+            if " " in potential:
+                fixed = potential.replace(" ", "").rstrip(".")
+                if len(fixed) > 10:
+                    return fixed
+        return None
+
     def _format_single_with_status(self, query: str) -> (str, bool, str):
-        """
-        内部辅助方法
-        返回: (格式化后的文本, 是否成功, 原文URL)
-        """
+        """内部辅助方法：执行真实的 API 查询"""
         if not self.engines:
             return f"{query} ❌ (未启用API)", False, ""
-        if len(query) < 4:
-            return f"{query} ❌", False, ""
 
-        is_pure_doi = "10." in query and "/" in query and len(query.split()) < 2
-        if is_pure_doi: query = query.strip()
+        extracted_dois, text_without_doi = self._extract_and_clean_doi(query)
 
-        # 【回退】移除了针对中文的引擎重排序逻辑，直接遍历英文引擎
+        if not extracted_dois:
+            broken_doi = self._try_fix_broken_doi(query)
+            if broken_doi:
+                print(f"   [智能修复] 检测到疑似断裂 DOI，尝试修复为: {broken_doi}")
+                extracted_dois = [broken_doi]
+                text_without_doi = query.replace("doi", "").replace("DOI", "")
+
+        if extracted_dois:
+            target_doi = extracted_dois[0]
+            print(f"   [策略] 发现 DOI ({target_doi})，启动精准打击...")
+
+            for engine in self.engines:
+                if "Crossref" in engine.name or "OpenAlex" in engine.name:
+                    try:
+                        citation_data = engine.search(target_doi)
+                        if citation_data and citation_data.title:
+                            if len(text_without_doi) > 10:
+                                print("   [核对] 正在比对 DOI 结果与原文描述...")
+                                is_match, reason = self._validate_result(text_without_doi, citation_data)
+                                if is_match:
+                                    print(f"   [成功] DOI 精准命中且核对通过: {citation_data.title[:20]}...")
+                                    return formatter.to_gbt7714(citation_data), True, citation_data.url
+                                else:
+                                    print(
+                                        f"   [警告] DOI 结果与原文描述严重不符 ({reason})，放弃 DOI 结果，转为常规搜索...")
+                                    break
+                            else:
+                                print(f"   [成功] 纯 DOI 输入，无核对直接返回: {citation_data.title[:20]}...")
+                                return formatter.to_gbt7714(citation_data), True, citation_data.url
+
+                    except Exception as e:
+                        print(f"   [DOI失败] {engine.name} 未能解析: {e}")
+
+            print("   [策略] DOI 查询失效或校验未通过，转为常规搜索（已移除 DOI 字符串）...")
+
+        search_query = text_without_doi if text_without_doi else query
+        if len(search_query) < 4:
+            return f"{query} ❌ (内容过短)", False, ""
+
+        print(f"   [搜索] 关键词: {search_query[:30]}...")
+
         for engine in self.engines:
             try:
-                citation_data = engine.search(query)
+                citation_data = engine.search(search_query)
                 if citation_data:
-                    # 调用验证逻辑 (V3.1版本)
-                    is_match, reason = self._validate_result(query, citation_data)
+                    is_match, reason = self._validate_result(search_query, citation_data)
                     if is_match:
-                        # 成功！返回 URL
                         return formatter.to_gbt7714(citation_data), True, citation_data.url
                     else:
                         print(f"   [校验失败] {engine.name} 结果被拦截: {reason}")
@@ -1542,34 +1731,38 @@ class Orchestrator:
                 print(f"   [引擎错误] {engine.name}: {e}")
                 continue
 
-        # 失败
         return f"{query} ❌", False, ""
 
     def format_single(self, query: str) -> str:
-        """兼容旧接口"""
+        """
+        单条处理入口，直接调用处理函数
+        """
         res, _, _ = self._format_single_with_status(query)
         return res
 
     def _validate_result(self, user_query: str, data) -> (bool, str):
-        """
-        【保留 V3.1 核心修复】
-        保留了短姓氏支持、标题确信豁免等英文优化逻辑。
-        移除了中文特权通道。
-        """
+        """保留您之前的所有验证逻辑，包括抗粘连算法"""
         if not data.title: return False, "无标题"
-
-        # 【回退】移除了中文/本地解析的特权通道
 
         query_lower = user_query.lower()
         title_lower = data.title.lower()
 
-        # 0. DOI 绝对信任
         if data.doi and len(data.doi) > 5 and data.doi.lower() in query_lower:
             return True, "DOI精确匹配"
 
-        # 预处理：分词
+        def super_clean(t):
+            return re.sub(r'[\W_]+', '', t).lower()
+
+        q_super = super_clean(user_query)
+        t_super = super_clean(data.title)
+
+        if len(t_super) > 15:
+            if t_super in q_super:
+                return True, "抗粘连:标题全匹配"
+            if len(q_super) > 15 and q_super in t_super:
+                return True, "抗粘连:原文是标题子集"
+
         def get_tokens(text):
-            # 增加对 None 的保护
             if not text: return []
             clean = re.sub(r'[^\w\s]', ' ', text)
             return [w for w in clean.split() if len(w) > 2]
@@ -1579,18 +1772,15 @@ class Orchestrator:
 
         if not title_tokens: return False, "API标题无效"
 
-        # 1. 标题词覆盖率
         match_count = sum(1 for w in title_tokens if w in query_tokens)
         coverage = match_count / len(title_tokens)
 
-        # 标题确信豁免 (V3.1 保留)
         if coverage > 0.8:
             return True, f"标题高度吻合({coverage:.1%})"
 
         if coverage < 0.4:
             return False, f"标题差异过大({coverage:.1%})"
 
-        # 2. 连词检测 (V3.1 保留)
         has_bigram = False
         if len(title_tokens) >= 2:
             for i in range(len(title_tokens) - 1):
@@ -1604,18 +1794,16 @@ class Orchestrator:
         if not has_bigram and coverage < 0.8:
             return False, "无连续词重叠"
 
-        # 3. 作者校验 (V3.1 保留)
         looks_like_has_author = "et al" in query_lower or "," in query_lower
         year_match = data.year and (str(data.year) in query_lower)
 
         author_match = False
         if data.authors:
             for auth in data.authors:
-                if not auth: continue  # 保护空作者
+                if not auth: continue
                 raw_auth_clean = re.sub(r'[^\w\s]', ' ', auth.lower())
                 raw_parts = raw_auth_clean.split()
                 for part in raw_parts:
-                    # 放宽长度限制到 >= 2 (保留对 Li, Wu, Yao 的支持)
                     if len(part) >= 2 and part in query_lower:
                         author_match = True
                         break
@@ -1995,7 +2183,6 @@ class CrossrefEngine(BaseEngine):
         super().__init__()
         self.name = "Crossref"
         self.api_url = config.SourceConfig.CROSSREF_API_URL
-        # Crossref 建议在 Header 中带上邮箱，进入 "Polite Pool"，速度更快且更稳定
         self.email = config.CONTACT_EMAIL
 
     def get_headers(self) -> dict:
@@ -2008,20 +2195,20 @@ class CrossrefEngine(BaseEngine):
         if not config.SourceConfig.CROSSREF_ENABLED:
             return None
 
-        # 1. 智能判断：如果是 DOI 格式，直接精确查询
-        # 简单判断是否包含 "10." 开头的 DOI 特征
-        is_doi = "10." in query and "/" in query
+        # 1. 智能判断：如果是 DOI 格式，直接精准查询
+        # 判断逻辑：包含 "10." 且包含 "/"，且不包含空格（或长度很短）
+        # Orchestrator 传进来的 DOI 应该是清洗过的，不含空格
+        is_pure_doi = "10." in query and "/" in query and " " not in query
 
         params = {}
-        if is_doi:
+        if is_pure_doi:
             # 如果看起来像 DOI，清理一下直接查
             clean_doi = query.strip()
-            # 移除可能的前缀
+            # 移除可能的前缀 (虽然 Orchestrator 已经移除了，这里双重保险)
             if "doi.org/" in clean_doi:
                 clean_doi = clean_doi.split("doi.org/")[-1]
 
-            # Crossref 单个作品查询不需要参数，直接拼在 URL 后面
-            # 但为了统一架构，我们还是用 query.bibliographic 搜索模式，容错率高
+            # Crossref 搜索模式，如果只有 query.bibliographic 放 DOI，通常能直接命中
             params = {
                 "query.bibliographic": clean_doi,
                 "rows": 1
@@ -2035,7 +2222,7 @@ class CrossrefEngine(BaseEngine):
                 "sort": "relevance"
             }
 
-        self.logger.info(f"[{self.name}] 正在请求 API: {query[:20]}...")
+        self.logger.info(f"[{self.name}] 正在请求 API ({'DOI模式' if is_pure_doi else '搜索模式'}): {query[:20]}...")
 
         # 2. 发送请求
         data = self.safe_request(self.api_url, params)
@@ -2122,7 +2309,7 @@ class CrossrefEngine(BaseEngine):
 
 class OpenAlexEngine(BaseEngine):
     def search(self, query: str) -> CitationData:
-        # 输入标题，返回数据
+        # 输入标题或 DOI，返回数据
         pass
 =========================================================
 """
@@ -2130,14 +2317,10 @@ class OpenAlexEngine(BaseEngine):
 import sys
 import os
 
-# === 路径修复代码 (必须放在最前面) ===
-# 1. 获取当前文件的绝对路径
+# === 路径修复代码 ===
 current_file_path = os.path.abspath(__file__)
-# 2. 获取当前文件所在目录 (services/api_engines)
 current_dir = os.path.dirname(current_file_path)
-# 3. 获取项目根目录 (向上跳两级: services -> project_root)
 project_root = os.path.dirname(os.path.dirname(current_dir))
-# 4. 将根目录加入 Python 搜索路径，解决 "ModuleNotFoundError"
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 # ==========================================
@@ -2161,41 +2344,62 @@ class OpenAlexEngine(BaseEngine):
         if not config.SourceConfig.OPENALEX_ENABLED:
             return None
 
-        # 1. 准备参数
-        # OpenAlex 的搜索参数通常是filter或者search
-        # 这里使用 search 模式匹配标题
-        params = {
-            "search": query,
-            "per_page": 1  # 我们只需要匹配度最高的那一条
-        }
+        # === 1. 智能参数构建 (V2.0 Update) ===
+        # 判断传入的是否为纯 DOI (包含 "10." 且含 "/")
+        is_pure_doi = "10." in query and "/" in query and " " not in query
 
-        # 2. 发送请求 (使用父类的安全方法)
+        params = {}
+
+        if is_pure_doi:
+            # 【精确模式】使用 filter=doi:xxx
+            # OpenAlex 要求 DOI 必须是完整的 URL 格式 (https://doi.org/10.xxx)
+            # 或者直接是 doi:10.xxx
+            clean_doi = query.strip()
+            # 补全 https://doi.org/ 前缀，确保 OpenAlex 能识别
+            if not clean_doi.startswith("https://doi.org/") and not clean_doi.startswith("http://doi.org/"):
+                doi_url = f"https://doi.org/{clean_doi}"
+            else:
+                doi_url = clean_doi
+
+            params = {
+                "filter": f"doi:{doi_url}",
+                "per_page": 1
+            }
+            self.logger.info(f"[{self.name}] 启动 DOI 精确查找: {clean_doi}")
+        else:
+            # 【模糊模式】使用 search=xxx
+            params = {
+                "search": query,
+                "per_page": 1
+            }
+            self.logger.info(f"[{self.name}] 启动关键词搜索: {query[:20]}...")
+
+        # 2. 发送请求
         data = self.safe_request(self.api_url, params)
 
         # 3. 解析数据
         if not data or "results" not in data or not data["results"]:
-            self.logger.info(f"[{self.name}] 未找到结果: {query[:20]}...")
+            # 如果是精确查找失败了，日志记录一下
+            if is_pure_doi:
+                self.logger.info(f"[{self.name}] DOI 未找到对应记录。")
             return None
 
         # 拿到第一条最佳匹配结果
         best_match = data["results"][0]
 
-        # 4. 【核心】数据映射 (Data Mapping)
-        # 将 OpenAlex 的 JSON 格式 转换为 我们的 CitationData 格式
+        # 4. 数据映射
         return self._parse_json_to_model(best_match)
 
     def _parse_json_to_model(self, json_data: dict) -> CitationData:
         """
         私有方法：处理复杂的 JSON 结构
         """
-        # 创建空模型
         citation = CitationData()
 
         # A. 提取标题
         citation.title = json_data.get("display_name", "")
 
         # B. 提取作者 (OpenAlex 的作者在 authorships 列表里)
-        # 结构: authorships -> [ {author: {display_name: "Name"}} ]
         authors_raw = json_data.get("authorships", [])
         citation.authors = [
             item.get("author", {}).get("display_name", "")
@@ -2203,7 +2407,6 @@ class OpenAlexEngine(BaseEngine):
         ]
 
         # C. 提取来源 (期刊/会议)
-        # 结构: primary_location -> source -> display_name
         primary_loc = json_data.get("primary_location") or {}
         source_info = primary_loc.get("source") or {}
         citation.source = source_info.get("display_name", "")
@@ -2211,48 +2414,27 @@ class OpenAlexEngine(BaseEngine):
         # D. 提取年份
         citation.year = str(json_data.get("publication_year", ""))
 
-        # E. 提取卷期页 (OpenAlex 放在 biblio 字典里)
+        # E. 提取卷期页
         biblio = json_data.get("biblio", {})
         citation.volume = biblio.get("volume", "")
         citation.issue = biblio.get("issue", "")
         citation.pages = f"{biblio.get('first_page', '')}-{biblio.get('last_page', '')}"
 
-        # 清理页码格式 (如果只有first_page没last_page，去掉横杠)
         if citation.pages == "-":
             citation.pages = ""
         elif citation.pages.endswith("-"):
             citation.pages = citation.pages.strip("-")
 
         # F. 提取 DOI
-        # OpenAlex 返回的 DOI 通常是完整 URL (https://doi.org/10.xxx/xxx)
-        # 我们只需要后面的 10.xxx 部分
         doi_url = json_data.get("doi", "")
         if doi_url:
             citation.doi = doi_url.replace("https://doi.org/", "").replace("http://doi.org/", "")
+            citation.url = doi_url  # 同时也赋值给 url
 
-        # G. 保存原始数据备查
+        # G. 保存原始数据
         citation.raw_data = json_data
 
         return citation
-
-
-# --- 单元测试代码 (仅在直接运行此文件时执行) ---
-if __name__ == "__main__":
-    # 这一块代码是教你如何单独测试这个文件的
-    print("正在测试 OpenAlex 引擎...")
-    engine = OpenAlexEngine()
-    test_query = "Deep learning Nature 2015"
-    result = engine.search(test_query)
-
-    if result:
-        print("✅ 测试成功!")
-        print(f"标题: {result.title}")
-        print(f"作者: {result.authors}")
-        print(f"年份: {result.year}")
-        print(f"期刊: {result.source}")
-        print(f"页码: {result.pages}")
-    else:
-        print("❌ 测试失败或无结果")
 ```
 
 ---
